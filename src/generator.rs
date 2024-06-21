@@ -9,24 +9,6 @@ struct ColumnInfo {
     data_type: String,
     character_maximum_length: Option<i32>,
 }
-#[derive(sqlx::FromRow, Debug, PartialEq, Eq)]
-pub struct GroupHistory {
-    id: i64,
-    message_id: i64,
-    owner_id: String,
-    sender_id: String,
-    group_id: String,
-    content: String,
-    read_flag: String,
-    del_flag: String,
-    record_type: String,
-    read_time: String,
-    create_time: String,
-    command: i32,
-    mobile_ack: String,
-    pc_ack: String,
-    read_message_id: Option<i64>,
-}
 
 pub(crate) async fn gen_file(conn_url: &str, table_name: &str) -> Result<(), sqlx::Error> {
     let mut conn: PgConnection = PgConnection::connect(conn_url).await?;
