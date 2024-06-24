@@ -188,6 +188,7 @@ fn gen_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
     ret.remove(ret.len() - 2);
     ret.push_str("    ]);\n");
     ret.push_str("    let sql = sql.sql().unwrap();\n");
+    ret.push_str("    let result = sqlx::query(sql.as_str()).execute(&conn).await.unwrap();\n");
     ret.push_str("}\n\n\n");
     println!("insert function:\n{}", ret);
     ret
@@ -233,7 +234,9 @@ fn gen_batch_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> Stri
     ret.push_str("    }\n");
 
     ret.push_str("    let sql = sql.sql().unwrap();\n");
+    ret.push_str("    let result = sqlx::query(sql.as_str()).execute(&conn).await.unwrap();\n");
     ret.push_str("}\n\n\n");
+
     println!("batch insert function:\n{}", ret);
     ret
 }
@@ -248,6 +251,7 @@ mod test {
     use sqlx::postgres::types::{PgInterval, PgTimeTz};
     use sqlx::types::Decimal;
     use crate::field_to_string::FieldToString;
+
 
     #[derive(sqlx::FromRow, Debug, PartialEq)]
     pub struct TestTable {
@@ -281,36 +285,10 @@ mod test {
         json2: Option<serde_json::Value>,
         i5: Option<i16>,
     }
-    #[test]
-    fn name_struct_test() {
-        let name = "group_history";
-        gen_struct_name(name);
-    }
 
-    #[tokio::test]
-    async fn select_test() {
-
-
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
-        let sql = format!("select * from test_table");
-
-        let columns: Vec<TestTable> = sqlx::query_as(sql.as_str())
-            .fetch_all(&mut conn)
-            .await
-            .unwrap();
-        println!("columns:{:?}", columns)
-    }
-
-    #[test]
-    fn to_string_test() {
-        let now: DateTime<Utc> = DateTime::from(SystemTime::now());
-        println!("now:{}", now.to_string())
-    }
 
     pub async fn insert(conn: &mut PgConnection, obj: TestTable) {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
-        sql.field("id");
         sql.field("b1");
         sql.field("b2");
         sql.field("c1");
@@ -339,36 +317,43 @@ mod test {
         sql.field("json1");
         sql.field("json2");
         sql.field("i5");
-        sql.values(&[sql_builder::quote(obj.id.field_to_string()) ,sql_builder::quote(obj.b1.field_to_string()) ,sql_builder::quote(obj.b2.unwrap().field_to_string()) ,sql_builder::quote(obj.c1.field_to_string()) ,sql_builder::quote(obj.c2.unwrap().field_to_string()) ,sql_builder::quote(obj.i4.field_to_string()) ,sql_builder::quote(obj.i41.unwrap().field_to_string()) ,sql_builder::quote(obj.r1.field_to_string()) ,sql_builder::quote(obj.r2.unwrap().field_to_string()) ,sql_builder::quote(obj.d1.field_to_string()) ,sql_builder::quote(obj.d2.unwrap().field_to_string()) ,sql_builder::quote(obj.t1.field_to_string()) ,sql_builder::quote(obj.t2.field_to_string()) ,sql_builder::quote(obj.t3.unwrap().field_to_string()) ,sql_builder::quote(obj.t4.unwrap().field_to_string()) ,sql_builder::quote(obj.byte1.unwrap().field_to_string()) ,sql_builder::quote(obj.interval1.unwrap().field_to_string()) ,sql_builder::quote(obj.big1.unwrap().field_to_string()) ,sql_builder::quote(obj.big2.unwrap().field_to_string()) ,sql_builder::quote(obj.ts1.field_to_string()) ,sql_builder::quote(obj.ts2.unwrap().field_to_string()) ,sql_builder::quote(obj.date1.unwrap().field_to_string()) ,sql_builder::quote(obj.date2.unwrap().field_to_string()) ,sql_builder::quote(obj.time1.field_to_string()) ,sql_builder::quote(obj.time2.unwrap().field_to_string()) ,sql_builder::quote(obj.uid1.field_to_string()) ,sql_builder::quote(obj.json1.unwrap().field_to_string()) ,sql_builder::quote(obj.json2.unwrap().field_to_string()) ,sql_builder::quote(obj.i5.unwrap().field_to_string()) ]);
+        sql.values(&[
+            sql_builder::quote(obj.b1.field_to_string()),
+            sql_builder::quote(obj.b2.unwrap().field_to_string()),
+            sql_builder::quote(obj.c1.field_to_string()),
+            sql_builder::quote(obj.c2.unwrap().field_to_string()),
+            sql_builder::quote(obj.i4.field_to_string()),
+            sql_builder::quote(obj.i41.unwrap().field_to_string()),
+            sql_builder::quote(obj.r1.field_to_string()),
+            sql_builder::quote(obj.r2.unwrap().field_to_string()),
+            sql_builder::quote(obj.d1.field_to_string()),
+            sql_builder::quote(obj.d2.unwrap().field_to_string()),
+            sql_builder::quote(obj.t1.field_to_string()),
+            sql_builder::quote(obj.t2.field_to_string()),
+            sql_builder::quote(obj.t3.unwrap().field_to_string()),
+            sql_builder::quote(obj.t4.unwrap().field_to_string()),
+            sql_builder::quote(obj.byte1.unwrap().field_to_string()),
+            sql_builder::quote(obj.interval1.unwrap().field_to_string()),
+            sql_builder::quote(obj.big1.unwrap().field_to_string()),
+            sql_builder::quote(obj.big2.unwrap().field_to_string()),
+            sql_builder::quote(obj.ts1.field_to_string()),
+            sql_builder::quote(obj.ts2.unwrap().field_to_string()),
+            sql_builder::quote(obj.date1.unwrap().field_to_string()),
+            sql_builder::quote(obj.date2.unwrap().field_to_string()),
+            sql_builder::quote(obj.time1.field_to_string()),
+            sql_builder::quote(obj.time2.unwrap().field_to_string()),
+            sql_builder::quote(obj.uid1.field_to_string()),
+            sql_builder::quote(obj.json1.unwrap().field_to_string()),
+            sql_builder::quote(obj.json2.unwrap().field_to_string()),
+            sql_builder::quote(obj.i5.unwrap().field_to_string())
+        ]);
         let sql = sql.sql().unwrap();
-        println!("sql:\n{}", sql)
+        let result = sqlx::query(sql.as_str()).execute(conn).await.unwrap();
     }
 
-
-
-
-    #[tokio::test]
-    async fn insert_test() {
-        let obj = gen_test_table_obj();
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
-        insert(&mut conn, obj).await;
-    }
-
-    #[tokio::test]
-    async fn test_query_1() {
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
-        let columns: Vec<TestTable> = sqlx::query_as("select * from test_table")
-            .fetch_all(&mut conn)
-            .await
-            .unwrap();
-        println!("columns:{:?}", columns)
-    }
 
     pub async fn batch_insert(conn: &mut PgConnection, objs: Vec<TestTable>) {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
-        sql.field("id");
         sql.field("b1");
         sql.field("b2");
         sql.field("c1");
@@ -398,25 +383,89 @@ mod test {
         sql.field("json2");
         sql.field("i5");
         for obj in objs {
-            sql.values(&[sql_builder::quote(obj.id.field_to_string()) ,sql_builder::quote(obj.b1.field_to_string()) ,
-                sql_builder::quote(obj.b2.unwrap().field_to_string()) ,sql_builder::quote(obj.c1.field_to_string()) ,
-                sql_builder::quote(obj.c2.unwrap().field_to_string()) ,sql_builder::quote(obj.i4.field_to_string()) ,
-                sql_builder::quote(obj.i41.unwrap().field_to_string()) ,sql_builder::quote(obj.r1.field_to_string()) ,
-                sql_builder::quote(obj.r2.unwrap().field_to_string()) ,sql_builder::quote(obj.d1.field_to_string()) ,
-                sql_builder::quote(obj.d2.unwrap().field_to_string()) ,sql_builder::quote(obj.t1.field_to_string()) ,
-                sql_builder::quote(obj.t2.field_to_string()) ,sql_builder::quote(obj.t3.unwrap().field_to_string()) ,
-                sql_builder::quote(obj.t4.unwrap().field_to_string()) ,sql_builder::quote(obj.byte1.unwrap().field_to_string()) ,
-                sql_builder::quote(obj.interval1.unwrap().field_to_string()) ,sql_builder::quote(obj.big1.unwrap().field_to_string()) ,
-                sql_builder::quote(obj.big2.unwrap().field_to_string()) ,sql_builder::quote(obj.ts1.field_to_string()) ,
-                sql_builder::quote(obj.ts2.unwrap().field_to_string()) ,sql_builder::quote(obj.date1.unwrap().field_to_string()) ,
-                sql_builder::quote(obj.date2.unwrap().field_to_string()) ,sql_builder::quote(obj.time1.field_to_string()) ,
-                sql_builder::quote(obj.time2.unwrap().field_to_string()) ,sql_builder::quote(obj.uid1.field_to_string()) ,
-                sql_builder::quote(obj.json1.unwrap().field_to_string()) ,sql_builder::quote(obj.json2.unwrap().field_to_string()) ,
-                sql_builder::quote(obj.i5.unwrap().field_to_string()) ]);
+            sql.values(&[
+                sql_builder::quote(obj.b1.field_to_string()),
+                sql_builder::quote(obj.b2.unwrap().field_to_string()),
+                sql_builder::quote(obj.c1.field_to_string()),
+                sql_builder::quote(obj.c2.unwrap().field_to_string()),
+                sql_builder::quote(obj.i4.field_to_string()),
+                sql_builder::quote(obj.i41.unwrap().field_to_string()),
+                sql_builder::quote(obj.r1.field_to_string()),
+                sql_builder::quote(obj.r2.unwrap().field_to_string()),
+                sql_builder::quote(obj.d1.field_to_string()),
+                sql_builder::quote(obj.d2.unwrap().field_to_string()),
+                sql_builder::quote(obj.t1.field_to_string()),
+                sql_builder::quote(obj.t2.field_to_string()),
+                sql_builder::quote(obj.t3.unwrap().field_to_string()),
+                sql_builder::quote(obj.t4.unwrap().field_to_string()),
+                sql_builder::quote(obj.byte1.unwrap().field_to_string()),
+                sql_builder::quote(obj.interval1.unwrap().field_to_string()),
+                sql_builder::quote(obj.big1.unwrap().field_to_string()),
+                sql_builder::quote(obj.big2.unwrap().field_to_string()),
+                sql_builder::quote(obj.ts1.field_to_string()),
+                sql_builder::quote(obj.ts2.unwrap().field_to_string()),
+                sql_builder::quote(obj.date1.unwrap().field_to_string()),
+                sql_builder::quote(obj.date2.unwrap().field_to_string()),
+                sql_builder::quote(obj.time1.field_to_string()),
+                sql_builder::quote(obj.time2.unwrap().field_to_string()),
+                sql_builder::quote(obj.uid1.field_to_string()),
+                sql_builder::quote(obj.json1.unwrap().field_to_string()),
+                sql_builder::quote(obj.json2.unwrap().field_to_string()),
+                sql_builder::quote(obj.i5.unwrap().field_to_string())
+            ]);
         }
-
         let sql = sql.sql().unwrap();
-        println!("sql:\n{}", sql)
+        let result = sqlx::query(sql.as_str()).execute(conn).await.unwrap();
+    }
+
+
+
+
+    #[test]
+    fn name_struct_test() {
+        let name = "group_history";
+        gen_struct_name(name);
+    }
+
+    #[tokio::test]
+    async fn select_test() {
+
+
+        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let sql = format!("select * from test_table");
+
+        let columns: Vec<TestTable> = sqlx::query_as(sql.as_str())
+            .fetch_all(&mut conn)
+            .await
+            .unwrap();
+        println!("columns:{:?}", columns)
+    }
+
+    #[test]
+    fn to_string_test() {
+        let now: DateTime<Utc> = DateTime::from(SystemTime::now());
+        println!("now:{}", now.to_string())
+    }
+
+
+    #[tokio::test]
+    async fn insert_test() {
+        let obj = gen_test_table_obj();
+        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        insert(&mut conn, obj).await;
+    }
+
+    #[tokio::test]
+    async fn test_query_1() {
+        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let columns: Vec<TestTable> = sqlx::query_as("select * from test_table")
+            .fetch_all(&mut conn)
+            .await
+            .unwrap();
+        println!("columns:{:?}", columns)
     }
 
     #[tokio::test]
