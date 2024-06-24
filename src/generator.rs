@@ -22,9 +22,14 @@ pub(crate) async fn gen_file(conn_url: &str, table_name: &str) -> Result<(), sql
         return Ok(());
     }
     println!("columns:{:?}", columns);
-    gen_struct(table_name, &columns);
-    gen_insert_fn(table_name, &columns);
-    gen_batch_insert_fn(table_name, &columns);
+    let mut total_str = String::new();
+    let struct_str = gen_struct(table_name, &columns);
+    total_str.push_str(struct_str.as_str());
+    let insert_fn_str = gen_insert_fn(table_name, &columns);
+    total_str.push_str(insert_fn_str.as_str());
+    let batch_insert_fn = gen_batch_insert_fn(table_name, &columns);
+    total_str.push_str(batch_insert_fn.as_str());
+    std::fs::write(format!("{table_name}.rs"), total_str).unwrap();
     Ok(())
 }
 
@@ -47,7 +52,7 @@ fn gen_struct(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
         }
         st.push_str(",\n");
     }
-    st.push_str("}\n");
+    st.push_str("}\n\n\n");
     println!("gen bean:\n{st}");
     return st;
 }
@@ -174,16 +179,16 @@ fn gen_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
         ret.push_str(x);
         ret.push_str("\");\n")
     }
-    ret.push_str("    sql.values(&[");
+    ret.push_str("    sql.values(&[\n");
     for v in values {
-        ret.push_str("sql_builder::quote(");
+        ret.push_str("        sql_builder::quote(");
         ret.push_str(v.as_str());
-        ret.push_str(".field_to_string()) ,")
+        ret.push_str(".field_to_string()),\n")
     }
-    ret.remove(ret.len()-1);
-    ret.push_str("]);\n");
+    ret.remove(ret.len() - 2);
+    ret.push_str("    ]);\n");
     ret.push_str("    let sql = sql.sql().unwrap();\n");
-    ret.push_str("}\n");
+    ret.push_str("}\n\n\n");
     println!("insert function:\n{}", ret);
     ret
 }
@@ -215,20 +220,20 @@ fn gen_batch_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> Stri
         ret.push_str("\");\n")
     }
 
-    ret.push_str("   for obj in objs {\n");
+    ret.push_str("    for obj in objs {\n");
 
-    ret.push_str("       sql.values(&[");
+    ret.push_str("        sql.values(&[\n");
     for v in values {
-        ret.push_str("sql_builder::quote(");
+        ret.push_str("            sql_builder::quote(");
         ret.push_str(v.as_str());
-        ret.push_str(".field_to_string()) ,")
+        ret.push_str(".field_to_string()),\n")
     }
-    ret.remove(ret.len()-1);
-    ret.push_str("]);\n");
+    ret.remove(ret.len() - 2);
+    ret.push_str("        ]);\n");
     ret.push_str("    }\n");
 
     ret.push_str("    let sql = sql.sql().unwrap();\n");
-    ret.push_str("}\n");
+    ret.push_str("}\n\n\n");
     println!("batch insert function:\n{}", ret);
     ret
 }
@@ -236,7 +241,6 @@ fn gen_batch_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> Stri
 
 #[cfg(test)]
 mod test {
-    use std::fmt::{Display};
     use std::time::SystemTime;
     use chrono::{DateTime, FixedOffset, Utc};
     use crate::generator::gen_struct_name;
