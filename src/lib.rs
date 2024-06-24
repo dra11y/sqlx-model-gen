@@ -21,3 +21,4 @@ mod tests {
 }
 
 pub mod generator;
+pub mod field_to_string;
