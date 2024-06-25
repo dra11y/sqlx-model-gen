@@ -25,9 +25,9 @@ pub(crate) async fn gen_file(conn_url: &str, table_name: &str) -> Result<(), sql
     let mut total_str = String::new();
     let struct_str = gen_struct(table_name, &columns);
     total_str.push_str(struct_str.as_str());
-    let insert_fn_str = gen_insert_fn(table_name, &columns);
+    let insert_fn_str = gen_insert_returning_id_fn(table_name, &columns);
     total_str.push_str(insert_fn_str.as_str());
-    let batch_insert_fn = gen_batch_insert_fn(table_name, &columns);
+    let batch_insert_fn = gen_batch_insert_returning_id_fn(table_name, &columns);
     total_str.push_str(batch_insert_fn.as_str());
     std::fs::write(format!("{table_name}.rs"), total_str).unwrap();
     Ok(())
@@ -154,7 +154,7 @@ fn gen_struct_name(table: &str) -> String {
     return new_name;
 }
 
-fn gen_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+fn gen_insert_returning_id_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
     let struct_name = gen_struct_name(table_name);
     let ret = gen_field_and_value_str(column_infos, false);
 
@@ -173,7 +173,7 @@ pub async fn insert_returning_id(conn: &mut PgConnection, obj: {struct_name}) ->
 }
 
 
-fn gen_batch_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+fn gen_batch_insert_returning_id_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
     let struct_name = gen_struct_name(table_name);
 
     let ret = gen_field_and_batch_values_str(column_infos, false);
