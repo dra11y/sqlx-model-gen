@@ -159,7 +159,7 @@ fn gen_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
     let mut ret = String::new();
     ret.push_str("pub async fn insert(conn: &mut PgConnection, obj: ");
     ret.push_str(struct_name.as_str());
-    ret.push_str(") {\n");
+    ret.push_str(") -> i64 {\n");
 
     ret.push_str( format!("    let mut sql = sql_builder::SqlBuilder::insert_into(\"{table_name}\");\n").as_str());
 
@@ -187,8 +187,10 @@ fn gen_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
     }
     ret.remove(ret.len() - 2);
     ret.push_str("    ]);\n");
+    ret.push_str("    sql.returning_id();\n");
     ret.push_str("    let sql = sql.sql().unwrap();\n");
-    ret.push_str("    let result = sqlx::query(sql.as_str()).execute(&conn).await.unwrap();\n");
+    ret.push_str("    let columns:(i64,)  = sqlx::query_as(sql.as_str()).fetch_one(conn).await.unwrap();\n");
+    ret.push_str("    return columns.0\n");
     ret.push_str("}\n\n\n");
     println!("insert function:\n{}", ret);
     ret
@@ -200,7 +202,7 @@ fn gen_batch_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> Stri
     let mut ret = String::new();
     ret.push_str("pub async fn batch_insert(conn: &mut PgConnection, objs: Vec<");
     ret.push_str(struct_name.as_str());
-    ret.push_str(">) {\n");
+    ret.push_str(">) -> Vec<i64> {\n");
 
     ret.push_str( format!("    let mut sql = sql_builder::SqlBuilder::insert_into(\"{table_name}\");\n").as_str());
 
@@ -232,9 +234,17 @@ fn gen_batch_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> Stri
     ret.remove(ret.len() - 2);
     ret.push_str("        ]);\n");
     ret.push_str("    }\n");
-
+    ret.push_str("    sql.returning_id();");
     ret.push_str("    let sql = sql.sql().unwrap();\n");
-    ret.push_str("    let result = sqlx::query(sql.as_str()).execute(&conn).await.unwrap();\n");
+    ret.push_str(r#"
+    let columns:Vec<(i64,)> = sqlx::query_as(sql.as_str()).fetch_all(conn).await.unwrap();
+    let mut ret = vec![];
+    for v in columns {
+        ret.push(v.0)
+    }
+    println!("insert id:{:?}", ret);
+    "#);
+    ret.push_str("return ret;\n");
     ret.push_str("}\n\n\n");
 
     println!("batch insert function:\n{}", ret);
@@ -287,8 +297,9 @@ mod test {
     }
 
 
-    pub async fn insert(conn: &mut PgConnection, obj: TestTable) {
+    pub async fn insert(conn: &mut PgConnection, obj: TestTable) -> i64 {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
+        sql.field("id");
         sql.field("b1");
         sql.field("b2");
         sql.field("c1");
@@ -318,6 +329,7 @@ mod test {
         sql.field("json2");
         sql.field("i5");
         sql.values(&[
+            sql_builder::quote(obj.id.field_to_string()),
             sql_builder::quote(obj.b1.field_to_string()),
             sql_builder::quote(obj.b2.unwrap().field_to_string()),
             sql_builder::quote(obj.c1.field_to_string()),
@@ -347,12 +359,15 @@ mod test {
             sql_builder::quote(obj.json2.unwrap().field_to_string()),
             sql_builder::quote(obj.i5.unwrap().field_to_string())
         ]);
+        sql.returning_id();
         let sql = sql.sql().unwrap();
-        let result = sqlx::query(sql.as_str()).execute(conn).await.unwrap();
+        let columns:(i64,)  = sqlx::query_as(sql.as_str()).fetch_one(conn).await.unwrap();
+        println!("insert id:{}", columns.0);
+        return columns.0
     }
 
 
-    pub async fn batch_insert(conn: &mut PgConnection, objs: Vec<TestTable>) {
+    pub async fn batch_insert(conn: &mut PgConnection, objs: Vec<TestTable>) -> Vec<i64> {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
         sql.field("b1");
         sql.field("b2");
@@ -414,11 +429,16 @@ mod test {
                 sql_builder::quote(obj.i5.unwrap().field_to_string())
             ]);
         }
+        sql.returning_id();
         let sql = sql.sql().unwrap();
-        let result = sqlx::query(sql.as_str()).execute(conn).await.unwrap();
+        let columns:Vec<(i64,)> = sqlx::query_as(sql.as_str()).fetch_all(conn).await.unwrap();
+        let mut ret = vec![];
+        for v in columns {
+            ret.push(v.0)
+        }
+        println!("insert id:{:?}", ret);
+        return ret;
     }
-
-
 
 
     #[test]
