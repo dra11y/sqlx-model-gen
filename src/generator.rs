@@ -157,15 +157,13 @@ fn gen_struct_name(table: &str) -> String {
 fn gen_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
     let struct_name = gen_struct_name(table_name);
     let mut ret = String::new();
-    ret.push_str("pub async fn insert(conn: &mut PgConnection, obj: ");
-    ret.push_str(struct_name.as_str());
-    ret.push_str(") -> i64 {\n");
-
-    ret.push_str( format!("    let mut sql = sql_builder::SqlBuilder::insert_into(\"{table_name}\");\n").as_str());
 
     let mut fields = vec![];
     let mut values = vec![];
     for c in column_infos {
+        if c.column_name == "id" {
+            continue;
+        }
         if c.is_nullable == "NO" {
             fields.push(c.column_name.as_str());
             values.push("obj.".to_string() + c.column_name.as_str())
@@ -187,13 +185,19 @@ fn gen_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
     }
     ret.remove(ret.len() - 2);
     ret.push_str("    ]);\n");
-    ret.push_str("    sql.returning_id();\n");
-    ret.push_str("    let sql = sql.sql().unwrap();\n");
-    ret.push_str("    let columns:(i64,)  = sqlx::query_as(sql.as_str()).fetch_one(conn).await.unwrap();\n");
-    ret.push_str("    return columns.0\n");
-    ret.push_str("}\n\n\n");
-    println!("insert function:\n{}", ret);
-    ret
+
+    let fn_str = format!(r#"
+pub async fn insert_returning_id(conn: &mut PgConnection, obj: {struct_name}) -> i64 {{
+    let mut sql = sql_builder::SqlBuilder::insert_into("{table_name}");
+{ret}
+    sql.returning_id();
+    let sql = sql.sql().unwrap();
+    let columns:(i64,) = sqlx::query_as(sql.as_str()).fetch_one(conn).await.unwrap();
+    return columns.0
+}}
+    "#);
+
+    return fn_str
 }
 
 
@@ -297,9 +301,9 @@ mod test {
     }
 
 
-    pub async fn insert(conn: &mut PgConnection, obj: TestTable) -> i64 {
+
+    pub async fn insert_returning_id(conn: &mut PgConnection, obj: TestTable) -> i64 {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
-        sql.field("id");
         sql.field("b1");
         sql.field("b2");
         sql.field("c1");
@@ -329,7 +333,6 @@ mod test {
         sql.field("json2");
         sql.field("i5");
         sql.values(&[
-            sql_builder::quote(obj.id.field_to_string()),
             sql_builder::quote(obj.b1.field_to_string()),
             sql_builder::quote(obj.b2.unwrap().field_to_string()),
             sql_builder::quote(obj.c1.field_to_string()),
@@ -359,10 +362,11 @@ mod test {
             sql_builder::quote(obj.json2.unwrap().field_to_string()),
             sql_builder::quote(obj.i5.unwrap().field_to_string())
         ]);
+
         sql.returning_id();
         let sql = sql.sql().unwrap();
         let columns:(i64,)  = sqlx::query_as(sql.as_str()).fetch_one(conn).await.unwrap();
-        println!("insert id:{}", columns.0);
+        println!("insert:{}", columns.0);
         return columns.0
     }
 
@@ -474,7 +478,7 @@ mod test {
         let obj = gen_test_table_obj();
         let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
         let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
-        insert(&mut conn, obj).await;
+        insert_returning_id(&mut conn, obj).await;
     }
 
     #[tokio::test]
