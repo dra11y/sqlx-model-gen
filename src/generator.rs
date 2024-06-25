@@ -156,35 +156,7 @@ fn gen_struct_name(table: &str) -> String {
 
 fn gen_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
     let struct_name = gen_struct_name(table_name);
-    let mut ret = String::new();
-
-    let mut fields = vec![];
-    let mut values = vec![];
-    for c in column_infos {
-        if c.column_name == "id" {
-            continue;
-        }
-        if c.is_nullable == "NO" {
-            fields.push(c.column_name.as_str());
-            values.push("obj.".to_string() + c.column_name.as_str())
-        } else {
-            fields.push(c.column_name.as_str());
-            values.push("obj.".to_string() + c.column_name.as_str() + ".unwrap()")
-        }
-    }
-    for x in fields {
-        ret.push_str("    sql.field(\"");
-        ret.push_str(x);
-        ret.push_str("\");\n")
-    }
-    ret.push_str("    sql.values(&[\n");
-    for v in values {
-        ret.push_str("        sql_builder::quote(");
-        ret.push_str(v.as_str());
-        ret.push_str(".field_to_string()),\n")
-    }
-    ret.remove(ret.len() - 2);
-    ret.push_str("    ]);\n");
+    let ret = gen_field_and_value_str(column_infos, false);
 
     let fn_str = format!(r#"
 pub async fn insert_returning_id(conn: &mut PgConnection, obj: {struct_name}) -> i64 {{
@@ -203,12 +175,73 @@ pub async fn insert_returning_id(conn: &mut PgConnection, obj: {struct_name}) ->
 
 fn gen_batch_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
     let struct_name = gen_struct_name(table_name);
+
+    let ret = gen_field_and_batch_values_str(column_infos, false);
+
+    let fn_str = format!(r#"
+
+pub async fn batch_insert_returning_id(conn: &mut PgConnection, objs: Vec<{struct_name}>) -> Vec<i64> {{
+    let mut sql = sql_builder::SqlBuilder::insert_into("{table_name}");
+{ret}
+
+    sql.returning_id();
+    let sql = sql.sql().unwrap();
+    let columns:Vec<(i64,)> = sqlx::query_as(sql.as_str()).fetch_all(conn).await.unwrap();
+    let mut ret = vec![];
+    for v in columns {{
+        ret.push(v.0)
+    }}
+    println!("insert id:{{:?}}", ret);
+    return ret;
+
+}}
+    "#);
+
+    fn_str
+}
+
+fn gen_field_and_value_str(column_infos: &Vec<ColumnInfo>, contain_id: bool) -> String {
     let mut ret = String::new();
 
     let mut fields = vec![];
     let mut values = vec![];
     for c in column_infos {
-        if c.column_name == "id" {
+        if c.column_name == "id" && !contain_id {
+            continue;
+        }
+        if c.is_nullable == "NO" {
+            fields.push(c.column_name.as_str());
+            values.push("obj.".to_string() + c.column_name.as_str())
+        } else {
+            fields.push(c.column_name.as_str());
+            values.push("obj.".to_string() + c.column_name.as_str() + ".unwrap()")
+        }
+    }
+
+    for x in fields {
+        ret.push_str("    sql.field(\"");
+        ret.push_str(x);
+        ret.push_str("\");\n")
+    }
+    ret.push_str("    sql.values(&[\n");
+    for v in values {
+        ret.push_str("        sql_builder::quote(");
+        ret.push_str(v.as_str());
+        ret.push_str(".field_to_string()),\n")
+    }
+    ret.remove(ret.len() - 2);
+    ret.push_str("    ]);\n");
+
+    ret
+}
+
+
+fn gen_field_and_batch_values_str(column_infos: &Vec<ColumnInfo>, contain_id: bool) -> String {
+    let mut ret = String::new();
+    let mut fields = vec![];
+    let mut values = vec![];
+    for c in column_infos {
+        if c.column_name == "id" && !contain_id {
             continue;
         }
         if c.is_nullable == "NO" {
@@ -237,28 +270,7 @@ fn gen_batch_insert_fn(table_name: &str, column_infos: &Vec<ColumnInfo>) -> Stri
     ret.push_str("        ]);\n");
     ret.push_str("    }\n");
 
-    println!("batch insert function:\n{}", ret);
-
-    let fn_str = format!(r#"
-
-pub async fn batch_insert_returning_id(conn: &mut PgConnection, objs: Vec<{struct_name}>) -> Vec<i64> {{
-    let mut sql = sql_builder::SqlBuilder::insert_into("{table_name}");
-{ret}
-
-    sql.returning_id();
-    let sql = sql.sql().unwrap();
-    let columns:Vec<(i64,)> = sqlx::query_as(sql.as_str()).fetch_all(conn).await.unwrap();
-    let mut ret = vec![];
-    for v in columns {{
-        ret.push(v.0)
-    }}
-    println!("insert id:{{:?}}", ret);
-    return ret;
-
-}}
-    "#);
-
-    fn_str
+    ret
 }
 
 
@@ -305,8 +317,6 @@ mod test {
         json2: Option<serde_json::Value>,
         i5: Option<i16>,
     }
-
-
 
     pub async fn insert_returning_id(conn: &mut PgConnection, obj: TestTable) -> i64 {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
@@ -449,9 +459,8 @@ mod test {
         }
         println!("insert id:{:?}", ret);
         return ret;
+
     }
-
-
     #[test]
     fn name_struct_test() {
         let name = "group_history";
