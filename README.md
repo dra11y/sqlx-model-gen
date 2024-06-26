@@ -1,4 +1,4 @@
-# Aoubt
+# About
 
 this is a rust tool for generate sql and table struct
 
