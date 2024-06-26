@@ -2,7 +2,8 @@
 name = "sql_wrapper"
 version = "0.1.0"
 edition = "2021"
-
+description = "Generate table Struct and Sql function for talle based on sqlx and sql_builder"
+license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
