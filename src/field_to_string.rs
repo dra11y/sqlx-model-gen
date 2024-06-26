@@ -139,6 +139,12 @@ impl FieldToString for DateTime<chrono::Utc> {
     }
 }
 
+impl FieldToString for DateTime<chrono::Local> {
+    fn field_to_string(&self) -> String {
+        self.to_string()
+    }
+}
+
 impl FieldToString for NaiveDate {
     fn field_to_string(&self) -> String {
         self.to_string()
