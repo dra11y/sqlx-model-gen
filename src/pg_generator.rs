@@ -614,7 +614,7 @@ mod test {
     async fn select_by_id_test() {
         let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
         let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
-        let result = select_by_id(&mut conn, 64).await;
+        let result = select_by_id(&mut conn, 65).await;
         println!("{:?}", result)
     }
 
@@ -636,7 +636,7 @@ mod test {
             t2: "5da".to_string(),
             t3: Some("test".to_string()),
             t4: Some("adf".to_string()),
-            byte1: Some(vec![2,3,4,5]),
+            byte1: Some(Vec::from("안녕하세요你好こんにちはЗдравствуйте💖💖💖💖💖")),
             interval1: Some(PgInterval{
                 months: 0,
                 days: 1,
@@ -655,6 +655,13 @@ mod test {
             json2: Some(serde_json::from_str("[{}, {}]").unwrap()),
             i5: Some(12),
         }
+    }
+
+    #[test]
+    fn test_vec8() {
+        let vec = Vec::from("안녕하세요你好こんにちはЗдравствуйте💖💖💖💖💖");
+        let str2 = String::from_utf8(vec).unwrap();
+        println!("{}", str2);
     }
 
 

@@ -110,7 +110,8 @@ impl FieldToString for bool {
 
 impl FieldToString for Vec<u8> {
     fn field_to_string(&self) -> String {
-        format!("{:?}", self)
+        String::from_utf8(self.to_vec()).unwrap()
+        // format!("{:?}", self)
     }
 }
 
