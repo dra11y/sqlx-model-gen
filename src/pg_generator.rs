@@ -164,6 +164,19 @@ pub async fn batch_insert(conn: &mut PgConnection, objs: Vec<{struct_name}>) -> 
 
         fn_str
     }
+
+    fn gen_select_by_id_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+        let sql = self.gen_select_sql(table_name, column_infos);
+        let struct_name = self.gen_struct_name(table_name);
+        format!(r#"
+pub async fn select_by_id(conn: &mut PgConnection,id: i64) -> Result<{struct_name}, sqlx::Error> {{
+        let sql = format!("{sql} where id='{{}}'", id);
+        let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
+        result
+}}
+
+        "#)
+    }
 }
 
 
@@ -496,6 +509,18 @@ mod test {
 
     }
 
+    pub fn select_sql() -> String {
+        "select id, b1, b2, c1, c2, i4, i41, r1, r2, d1, d2, t1, t2, t3, t4, byte1, interval1, big1, big2, ts1, ts2, date1, date2, time1, time2, uid1, json1, json2, i5  from test_table".to_string()
+    }
+
+    pub async fn select_by_id(conn: &mut PgConnection,id: i64) -> Result<TestTable, sqlx::Error> {
+        let sql = format!("select id, b1, b2, c1, c2, i4, i41, r1, r2, d1, d2, t1, t2, t3, t4, byte1, interval1, big1, big2, ts1, ts2, date1, date2, time1, time2, uid1, json1, json2, i5  from test_table where id='{}'", id);
+        let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
+        result
+    }
+
+
+
     #[test]
     fn name_struct_test() {
         let name = "group_history";
@@ -583,6 +608,14 @@ mod test {
         let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
         let result = batch_insert(&mut conn, list).await;
         println!("{:?}", result);
+    }
+
+    #[tokio::test]
+    async fn select_by_id_test() {
+        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let result = select_by_id(&mut conn, 64).await;
+        println!("{:?}", result)
     }
 
 

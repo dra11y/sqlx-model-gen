@@ -141,7 +141,14 @@ impl FieldToString for DateTime<chrono::Utc> {
 
 impl FieldToString for DateTime<chrono::Local> {
     fn field_to_string(&self) -> String {
-        self.to_string()
+        let str = self.to_string();
+        // 2024-06-27 10:05:49.96
+        let str = &str[0..22];
+        str.to_string()
+        // 2024-06-27T10:05:49.96
+        // let str = str.replace(" ", "T");
+        // println!("{str}");
+        // str
     }
 }
 

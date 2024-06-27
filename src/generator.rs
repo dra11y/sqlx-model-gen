@@ -406,6 +406,12 @@ pub trait Generator {
             let batch_insert_fn = self.gen_batch_insert_fn(table_name, &columns);
             total_str.push_str(batch_insert_fn.as_str());
 
+            let select_sql = self.gen_select_sql_fn(table_name, &columns);
+            total_str.push_str(select_sql.as_str());
+
+            let select_by_id_fn = self.gen_select_by_id_fn(table_name, &columns);
+            total_str.push_str(select_by_id_fn.as_str());
+
 
             std::fs::write(format!("{table_name}.rs"), total_str).unwrap();
             Ok(())
@@ -548,6 +554,30 @@ pub trait Generator {
     }
 
     fn gen_batch_insert_fn(&self, _table_name: &str, _column_infos: &Vec<ColumnInfo>) -> String {
+        String::new()
+    }
+
+    fn gen_select_sql(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+        let mut sql = String::from_str("select ").unwrap();
+        for c in column_infos {
+            sql.push_str(c.column_name.as_str());
+            sql.push_str(", ")
+        }
+        sql.remove(sql.len() - 2);
+        sql.push_str(" from ");
+        sql.push_str(table_name);
+        sql
+    }
+
+    fn gen_select_sql_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+        let sql = self.gen_select_sql(table_name, column_infos);
+        format!(r#"
+pub fn select_sql() -> String {{
+    "{sql}".to_string()
+}}
+        "#)
+    }
+    fn gen_select_by_id_fn(&self, _table_name: &str, _column_infos: &Vec<ColumnInfo>) -> String {
         String::new()
     }
 }

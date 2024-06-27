@@ -52,7 +52,7 @@ impl Generator for MysqlGenerator {
         } else if sql_type == "BLOB" ||  sql_type == "LONGBLOB" ||  sql_type == "MEDIUMBLOB" || sql_type == "TINYBLOB" {
             "Vec<u8>"
         } else if sql_type == "TIMESTAMP" {
-            "chrono::NaiveDateTime"
+            "chrono::DateTime<chrono::Local>"
         } else if sql_type == "DATETIME" {
             "chrono::NaiveDateTime"
         } else if sql_type == "DATE" {
@@ -158,6 +158,19 @@ pub async fn batch_insert(conn: &mut sqlx::MySqlConnection, objs: Vec<{struct_na
 
         fn_str
     }
+
+    fn gen_select_by_id_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+        let sql = self.gen_select_sql(table_name, column_infos);
+        let struct_name = self.gen_struct_name(table_name);
+        format!(r#"
+pub async fn select_by_id(conn: &mut sqlx::MySqlConnection,id: i64) -> Result<{struct_name}, sqlx::Error> {{
+        let sql = format!("{sql} where id='{{}}'", id);
+        let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
+        result
+}}
+
+        "#)
+    }
 }
 
 
@@ -166,7 +179,9 @@ pub async fn batch_insert(conn: &mut sqlx::MySqlConnection, objs: Vec<{struct_na
 
 #[cfg(test)]
 mod test {
-    use chrono::NaiveDateTime;
+    use std::str::FromStr;
+    use std::time::SystemTime;
+    use chrono::{DateTime, NaiveDate, NaiveDateTime};
     use sqlx::{Connection, MySqlConnection};
     use sqlx::types::Decimal;
     use crate::field_to_string::FieldToString;
@@ -225,6 +240,16 @@ mod test {
         let result = batch_insert_returning_id(&mut conn, vec![obj1, obj2]).await;
         println!("insert result:{:?}", result);
     }
+
+
+    #[tokio::test]
+    async fn select_by_id_test() {
+        let conn_url = "mysql://root:123456@localhost/test_db";
+        let mut conn: MySqlConnection = MySqlConnection::connect(conn_url).await.unwrap();
+        let result = select_by_id(&mut conn, 19).await;
+        println!("{:?}", result)
+    }
+
     fn gen_test_table_obj() -> TestTable {
         TestTable {
             id: 0,
@@ -250,15 +275,14 @@ mod test {
             big1: Some(Decimal::new(234,1)),
             blob2: Some(vec![3,4,5]),
             big2: Some(Decimal::new(223434, 2)),
-            ts1:  NaiveDateTime::parse_from_str("2015-09-05 23:56:04", "%Y-%m-%d %H:%M:%S").unwrap(),
-            date1: Some(Default::default()),
+            ts1:  DateTime::from(SystemTime::now()),
+            date1: Some(NaiveDate::default()),
             time1: Default::default(),
             i5: Some(12),
             blob3: Some(vec![3,4,5]),
-            dt: Default::default(),
+            dt: NaiveDateTime::from_str("2015-09-18T23:56:04").unwrap(),
         }
     }
-
     #[derive(sqlx::FromRow, Debug, PartialEq)]
     pub struct TestTable {
         id: i64,
@@ -285,7 +309,7 @@ mod test {
         big1: Option<sqlx::types::Decimal>,
         blob2: Option<Vec<u8>>,
         big2: Option<sqlx::types::Decimal>,
-        ts1: chrono::NaiveDateTime,
+        ts1: chrono::DateTime<chrono::Local>,
         dt: chrono::NaiveDateTime,
         date1: Option<chrono::NaiveDate>,
         time1: chrono::NaiveTime,
@@ -585,5 +609,17 @@ mod test {
         sqlx::query(sql.as_str()).execute(conn).await
 
     }
+
+    pub fn select_sql() -> String {
+        "select id, b1, b2, c1, c2, i4, i41, r1, r2, d1, d2, t1, tx1, tx2, tx3, t2, t3, t4, byte1, blob4, blob3, big1, blob2, big2, ts1, dt, date1, time1, i5  from test_table".to_string()
+    }
+
+    pub async fn select_by_id(conn: &mut sqlx::MySqlConnection,id: i64) -> Result<TestTable, sqlx::Error> {
+        let sql = format!("select id, b1, b2, c1, c2, i4, i41, r1, r2, d1, d2, t1, tx1, tx2, tx3, t2, t3, t4, byte1, blob4, blob3, big1, blob2, big2, ts1, dt, date1, time1, i5  from test_table where id='{}'", id);
+        let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
+        result
+    }
+
+
 
 }
