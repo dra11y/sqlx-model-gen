@@ -86,6 +86,10 @@ pub trait Generator {
             total_str.push_str(select_by_id_fn.as_str());
 
 
+            let delete_by_id_fn = self.gen_delete_by_id_fn(table_name);
+            total_str.push_str(delete_by_id_fn.as_str());
+
+
             std::fs::write(format!("{table_name}.rs"), total_str).unwrap();
             Ok(())
         }
@@ -253,6 +257,15 @@ pub fn select_sql() -> String {{
     fn gen_select_by_id_fn(&self, _table_name: &str, _column_infos: &Vec<ColumnInfo>) -> String {
         String::new()
     }
+
+    fn gen_delete_by_id_sql(&self, table_name: &str) -> String {
+        format!(r#"delete from {table_name} where id="#)
+    }
+
+    fn gen_delete_by_id_fn(&self, _table_name: &str) -> String {
+        String::new()
+    }
+
 }
 
 

@@ -164,11 +164,21 @@ pub async fn batch_insert(conn: &mut sqlx::MySqlConnection, objs: Vec<{struct_na
         let struct_name = self.gen_struct_name(table_name);
         format!(r#"
 pub async fn select_by_id(conn: &mut sqlx::MySqlConnection,id: i64) -> Result<{struct_name}, sqlx::Error> {{
-        let sql = format!("{sql} where id='{{}}'", id);
-        let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
-        result
+    let sql = format!("{sql} where id='{{}}'", id);
+    let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
+    result
 }}
 
+        "#)
+    }
+
+    fn gen_delete_by_id_fn(&self, _table_name: &str) -> String {
+        let sql = self.gen_delete_by_id_sql(_table_name);
+        format!(r#"
+pub async fn delete_by_id(conn: &mut sqlx::MySqlConnection,id: i64) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error> {{
+    let sql = format!("{sql}'{{}}'", id);
+    sqlx::query(sql.as_str()).execute(conn).await
+}}
         "#)
     }
 }
@@ -248,6 +258,14 @@ mod test {
         let mut conn: MySqlConnection = MySqlConnection::connect(conn_url).await.unwrap();
         let result = select_by_id(&mut conn, 19).await;
         println!("{:?}", result)
+    }
+
+    #[tokio::test]
+    async fn delete_by_id_test() {
+        let conn_url = "mysql://root:123456@localhost/test_db";
+        let mut conn: MySqlConnection = MySqlConnection::connect(conn_url).await.unwrap();
+        let result = delete_by_id(&mut conn, 1).await;
+        print!("{:?}", result);
     }
 
     fn gen_test_table_obj() -> TestTable {
@@ -621,5 +639,9 @@ mod test {
     }
 
 
+    pub async fn delete_by_id(conn: &mut sqlx::MySqlConnection,id: i64) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error> {
+        let sql = format!("delete from test_table where id='{}'", id);
+        sqlx::query(sql.as_str()).execute(conn).await
+    }
 
 }

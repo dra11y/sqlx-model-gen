@@ -31,7 +31,7 @@ after run the code. it will generate a file test_table.rs
 content:
 
 ```rust
-#[derive(sqlx::FromRow, Debug, PartialEq)] 
+#[derive(sqlx::FromRow, Debug, PartialEq)]
 pub struct TestTable {
     id: i64,
     b1: bool,
@@ -132,7 +132,7 @@ pub async fn insert_returning_id(conn: &mut PgConnection, obj: TestTable) -> i64
     let columns:(i64,) = sqlx::query_as(sql.as_str()).fetch_one(conn).await.unwrap();
     return columns.0
 }
-    
+
 pub async fn insert(conn: &mut PgConnection, obj: TestTable) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>  {
     let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
     sql.field("id");
@@ -200,7 +200,7 @@ pub async fn insert(conn: &mut PgConnection, obj: TestTable) -> Result<sqlx::pos
     sqlx::query(sql.as_str()).execute(conn).await
 
 }
-    
+
 
 pub async fn batch_insert_returning_id(conn: &mut PgConnection, objs: Vec<TestTable>) -> Vec<i64> {
     let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
@@ -277,7 +277,7 @@ pub async fn batch_insert_returning_id(conn: &mut PgConnection, objs: Vec<TestTa
     return ret;
 
 }
-    
+
 
 pub async fn batch_insert(conn: &mut PgConnection, objs: Vec<TestTable>) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>  {
     let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
@@ -349,17 +349,29 @@ pub async fn batch_insert(conn: &mut PgConnection, objs: Vec<TestTable>) -> Resu
     sqlx::query(sql.as_str()).execute(conn).await
 
 }
-    
+
 pub fn select_sql() -> String {
     "select id, b1, b2, c1, c2, i4, i41, r1, r2, d1, d2, t1, t2, t3, t4, byte1, interval1, big1, big2, ts1, ts2, date1, date2, time1, time2, uid1, json1, json2, i5  from test_table".to_string()
 }
-        
+
 pub async fn select_by_id(conn: &mut PgConnection,id: i64) -> Result<TestTable, sqlx::Error> {
-        let sql = format!("select id, b1, b2, c1, c2, i4, i41, r1, r2, d1, d2, t1, t2, t3, t4, byte1, interval1, big1, big2, ts1, ts2, date1, date2, time1, time2, uid1, json1, json2, i5  from test_table where id='{}'", id);
-        let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
-        result
+    let sql = format!("select id, b1, b2, c1, c2, i4, i41, r1, r2, d1, d2, t1, t2, t3, t4, byte1, interval1, big1, big2, ts1, ts2, date1, date2, time1, time2, uid1, json1, json2, i5  from test_table where id='{}'", id);
+    let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
+    result
 }
 
-        
-    
+
+pub async fn delete_by_id(conn: &mut PgConnection,id: i64) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+    let sql = format!("delete from test_table where id= '{}'", id);
+    sqlx::query(sql.as_str()).execute(conn).await
+}
+
+
+
 ```
+
+# Contact me
+
+email: zyy20101289@outlook.com
+
+wechat: zyy20101289

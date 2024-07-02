@@ -170,11 +170,21 @@ pub async fn batch_insert(conn: &mut PgConnection, objs: Vec<{struct_name}>) -> 
         let struct_name = self.gen_struct_name(table_name);
         format!(r#"
 pub async fn select_by_id(conn: &mut PgConnection,id: i64) -> Result<{struct_name}, sqlx::Error> {{
-        let sql = format!("{sql} where id='{{}}'", id);
-        let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
-        result
+    let sql = format!("{sql} where id='{{}}'", id);
+    let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
+    result
 }}
 
+        "#)
+    }
+
+    fn gen_delete_by_id_fn(&self, table_name: &str) -> String {
+        let sql = self.gen_delete_by_id_sql(table_name);
+        format!(r#"
+pub async fn delete_by_id(conn: &mut PgConnection,id: i64) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {{
+    let sql = format!("{sql} '{{}}'", id);
+    sqlx::query(sql.as_str()).execute(conn).await
+}}
         "#)
     }
 }
@@ -519,6 +529,10 @@ mod test {
         result
     }
 
+    pub async fn delete_by_id(conn: &mut PgConnection,id: i64) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+        let sql = format!("delete from test_table where id= '{}'", id);
+        sqlx::query(sql.as_str()).execute(conn).await
+    }
 
 
     #[test]
@@ -662,6 +676,14 @@ mod test {
         let vec = Vec::from("안녕하세요你好こんにちはЗдравствуйте💖💖💖💖💖");
         let str2 = String::from_utf8(vec).unwrap();
         println!("{}", str2);
+    }
+
+    #[tokio::test]
+    async fn delete_by_id_test() {
+        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let result =delete_by_id(&mut conn, 3).await;
+        println!("delete result:{:?}", result)
     }
 
 
