@@ -2,7 +2,7 @@ use sqlx::{Connection, MySqlConnection};
 use crate::generator::{ColumnInfo, Generator};
 
 
-struct MysqlGenerator {}
+pub struct MysqlGenerator {}
 
 impl Generator for MysqlGenerator {
     async fn query_columns(&self, conn_url: &str, table_name: &str) -> Vec<ColumnInfo> {
