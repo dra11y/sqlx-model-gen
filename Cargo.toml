@@ -1,6 +1,6 @@
 [package]
 name = "sql_wrapper"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "Generate table Struct and Sql function for table based on sqlx and sql_builder"
 license = "MIT"

@@ -102,7 +102,7 @@ pub trait Generator {
         st.push_str(self.gen_struct_name(table_name).as_str());
         st.push_str(" {\n");
         for c in column_infos {
-            st.push_str("    ");
+            st.push_str("    pub ");
             st.push_str(c.column_name.as_str());
             let ctype = self.get_mapping_type(c.data_type.as_str());
             st.push_str(": ");
