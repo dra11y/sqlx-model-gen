@@ -2,15 +2,48 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::str::FromStr;
 
-#[derive(sqlx::FromRow, Debug, PartialEq, Eq)]
+const RUST_KEYWORDS: [&str; 51] = [
+    "abstract", "alignof", "as", "async", "await", "become", "box", "break", "const", "continue",
+    "crate", "do", "dyn", "else", "enum", "extern", "false", "final", "fn", "for", "if", "impl",
+    "in", "let", "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref",
+    "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "typeof",
+    "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
+];
+
+pub(crate) fn escape_rs_keyword_name(input: &str) -> String {
+    match RUST_KEYWORDS.contains(&input) {
+        true => format!("r#{input}"),
+        false => input.to_string(),
+    }
+}
+
+#[derive(sqlx::FromRow, Clone, Debug, PartialEq, Eq)]
+pub struct TableInfo {
+    pub table_name: String,
+    pub is_view: bool,
+}
+
+#[derive(sqlx::FromRow, Clone, Debug, PartialEq, Eq)]
 pub struct ColumnInfo {
     pub column_name: String,
     pub is_nullable: bool,
     pub udt_name: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ModuleInfo {
+    pub struct_name: String,
+    pub content: String,
+    pub user_types: HashMap<String, (String, String)>,
+    pub columns: Vec<ColumnInfo>,
+}
+
 pub trait Generator {
-    fn get_tables(&self, conn_url: &str, schema: &str) -> impl Future<Output = Vec<String>> + Send;
+    fn get_tables(
+        &self,
+        conn_url: &str,
+        schema: &str,
+    ) -> impl Future<Output = Vec<TableInfo>> + Send;
 
     // async fn query_columns(&self, conn_url: &str, table_name: &str) -> Vec<ColumnInfo>;
     fn query_columns(
@@ -60,7 +93,7 @@ pub trait Generator {
         conn_url: &str,
         table_name: &str,
         udt_mappings: Option<&HashMap<String, String>>,
-    ) -> impl std::future::Future<Output = Result<String, sqlx::Error>> + Send
+    ) -> impl std::future::Future<Output = Result<ModuleInfo, sqlx::Error>> + Send
     where
         Self: Sync,
     {
@@ -75,7 +108,36 @@ pub trait Generator {
 
             println!("Columns: {:?}", columns);
 
-            Ok(self.gen_struct(table_name, &columns, udt_mappings))
+            let udt_mappings: HashMap<String, String> = udt_mappings
+                .cloned()
+                .unwrap_or(HashMap::new())
+                .into_iter()
+                .map(|(k, v)| (k.to_uppercase(), v))
+                .collect();
+
+            let user_types: HashMap<String, (String, String)> = columns
+                .iter()
+                .filter_map(|col| {
+                    udt_mappings
+                        .get(&col.udt_name.to_uppercase())
+                        .map(|rs_type| {
+                            (
+                                col.udt_name.clone(),
+                                (col.udt_name.clone(), rs_type.clone()),
+                            )
+                        })
+                })
+                .collect();
+
+            let struct_name = self.gen_struct_name(table_name);
+            let content = self.gen_struct(table_name, &columns, &udt_mappings);
+
+            Ok(ModuleInfo {
+                struct_name,
+                content,
+                user_types,
+                columns,
+            })
         }
     }
 
@@ -85,23 +147,17 @@ pub trait Generator {
         &self,
         table_name: &str,
         column_infos: &[ColumnInfo],
-        udt_mappings: Option<&HashMap<String, String>>,
+        udt_mappings: &HashMap<String, String>,
     ) -> String {
-        let udt_mappings: HashMap<String, String> = udt_mappings
-            .cloned()
-            .unwrap_or(HashMap::new())
-            .into_iter()
-            .map(|(k, v)| (k.to_uppercase(), v))
-            .collect();
-
         let mut st =
             String::from_str("#[derive(sqlx::FromRow, Clone, Debug, PartialEq)] \npub struct ")
                 .unwrap();
         st.push_str(self.gen_struct_name(table_name).as_str());
         st.push_str(" {\n");
         for c in column_infos {
+            let field_name = escape_rs_keyword_name(c.column_name.as_str());
             st.push_str("    pub ");
-            st.push_str(c.column_name.as_str());
+            st.push_str(field_name.as_str());
             let ctype = self.get_mapping_type(c.udt_name.as_str(), &udt_mappings);
             st.push_str(": ");
             if c.is_nullable {

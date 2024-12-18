@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 
-use crate::generator::{ColumnInfo, Generator};
+use crate::generator::{ColumnInfo, Generator, TableInfo};
 use sqlx::{Connection, MySqlConnection};
 
 pub struct MysqlGenerator {}
 
 impl Generator for MysqlGenerator {
-    async fn get_tables(&self, conn_url: &str, schema: &str) -> Vec<String> {
+    async fn get_tables(&self, conn_url: &str, schema: &str) -> Vec<TableInfo> {
         let mut conn: MySqlConnection = MySqlConnection::connect(conn_url).await.unwrap();
         let sql =
-            format!("select table_name from information_schema.tables where table_schema = $1;");
-        sqlx::query_scalar(sql.as_str())
+            "select table_name, (table_type = 'VIEW') AS is_view from information_schema.tables where table_type IN ('BASE TABLE', 'VIEW') AND table_schema = $1;".to_string();
+        sqlx::query_as(sql.as_str())
             .bind(schema)
             .fetch_all(&mut conn)
             .await
