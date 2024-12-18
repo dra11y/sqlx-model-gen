@@ -33,7 +33,8 @@ impl Generator for MysqlGenerator {
     }
 
     fn get_mapping_type(&self, sql_type: &str, udt_mappings: &HashMap<String, String>) -> String {
-        match sql_type.to_uppercase().as_str() {
+        let sql_type = sql_type.to_uppercase();
+        match sql_type.as_str() {
             "TINYINT" => "i8",
             "SMALLINT" => "i16",
             "INT" | "SERIAL" => "i32",
@@ -56,7 +57,9 @@ impl Generator for MysqlGenerator {
             "DECIMAL" => "sqlx::types::Decimal",
             "UUID" => "uuid::Uuid",
             "JSON" => "serde_json::Value",
-            _ => panic!("{}", format!("Unsupported Type: {}", sql_type)),
+            _ => udt_mappings.get(&sql_type).unwrap_or_else(|| {
+                panic!("Unsupported type: {}", sql_type);
+            }),
         }
         .to_string()
     }
