@@ -17,10 +17,38 @@ impl Generator for PgGenerator {
             .expect("Failed to query postgres tables")
     }
 
+    async fn query_all_columns(&self, conn_url: &str, schemas: &[&str]) -> Vec<ColumnInfo> {
+        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let sql = "SELECT
+                column_name,
+                table_name,
+                table_schema AS schema_name,
+                udt_name,
+                (is_nullable = 'YES') AS is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = ANY($1)
+            ORDER BY ordinal_position ASC;";
+        let columns: Vec<ColumnInfo> = sqlx::query_as(sql)
+            .bind(schemas)
+            .fetch_all(&mut conn)
+            .await
+            .unwrap();
+        columns
+    }
+
     async fn query_columns(&self, conn_url: &str, table_name: &str) -> Vec<ColumnInfo> {
         let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
-        let sql = format!("select column_name, udt_name, is_nullable = 'YES' AS is_nullable from information_schema.columns where table_name = '{table_name}' order by ordinal_position asc; ");
-        let columns: Vec<ColumnInfo> = sqlx::query_as(sql.as_str())
+        let sql = "SELECT
+                column_name,
+                table_name,
+                table_schema AS schema_name,
+                udt_name,
+                (is_nullable = 'YES') AS is_nullable
+            FROM information_schema.columns
+            WHERE table_name = $1
+            ORDER BY ordinal_position ASC;";
+        let columns: Vec<ColumnInfo> = sqlx::query_as(sql)
+            .bind(table_name)
             .fetch_all(&mut conn)
             .await
             .unwrap();

@@ -17,6 +17,10 @@ impl Generator for MysqlGenerator {
             .expect("Failed to query mysql tables")
     }
 
+    async fn query_all_columns(&self, conn_url: &str, schemas: &[&str]) -> Vec<ColumnInfo> {
+        todo!()
+    }
+
     async fn query_columns(&self, conn_url: &str, table_name: &str) -> Vec<ColumnInfo> {
         let mut conn: MySqlConnection = MySqlConnection::connect(conn_url).await.unwrap();
         let sql = format!(

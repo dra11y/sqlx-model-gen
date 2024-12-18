@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::str::FromStr;
 
+use serde::{Deserialize, Serialize};
+
 const RUST_KEYWORDS: [&str; 51] = [
     "abstract", "alignof", "as", "async", "await", "become", "box", "break", "const", "continue",
     "crate", "do", "dyn", "else", "enum", "extern", "false", "final", "fn", "for", "if", "impl",
@@ -17,20 +19,22 @@ pub(crate) fn escape_rs_keyword_name(input: &str) -> String {
     }
 }
 
-#[derive(sqlx::FromRow, Clone, Debug, PartialEq, Eq)]
+#[derive(sqlx::FromRow, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableInfo {
     pub table_name: String,
     pub is_view: bool,
 }
 
-#[derive(sqlx::FromRow, Clone, Debug, PartialEq, Eq)]
+#[derive(sqlx::FromRow, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColumnInfo {
     pub column_name: String,
+    pub table_name: String,
+    pub schema_name: String,
     pub is_nullable: bool,
     pub udt_name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleInfo {
     pub struct_name: String,
     pub content: String,
@@ -45,7 +49,12 @@ pub trait Generator {
         schema: &str,
     ) -> impl Future<Output = Vec<TableInfo>> + Send;
 
-    // async fn query_columns(&self, conn_url: &str, table_name: &str) -> Vec<ColumnInfo>;
+    fn query_all_columns(
+        &self,
+        conn_url: &str,
+        schemas: &[&str],
+    ) -> impl Future<Output = Vec<ColumnInfo>> + Send;
+
     fn query_columns(
         &self,
         conn_url: &str,
