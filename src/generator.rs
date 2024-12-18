@@ -1,18 +1,23 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::str::FromStr;
 
 #[derive(sqlx::FromRow, Debug, PartialEq, Eq)]
 pub struct ColumnInfo {
     pub column_name: String,
-    pub is_nullable: String,
-    pub data_type: String,
+    pub is_nullable: bool,
+    pub udt_name: String,
 }
 
-
 pub trait Generator {
+    fn get_tables(&self, conn_url: &str, schema: &str) -> impl Future<Output = Vec<String>> + Send;
 
     // async fn query_columns(&self, conn_url: &str, table_name: &str) -> Vec<ColumnInfo>;
-    fn query_columns(&self, conn_url: &str, table_name: &str) -> impl Future<Output = Vec<ColumnInfo>> + Send;
+    fn query_columns(
+        &self,
+        conn_url: &str,
+        table_name: &str,
+    ) -> impl Future<Output = Vec<ColumnInfo>> + Send;
 
     ///
     /// This is a tool for gen table_name mapping Struct and basic sql, such as insert.
@@ -23,10 +28,9 @@ pub trait Generator {
     ///
     /// now support
     ///
-    ///! MySql
+    /// MySql
     ///
-    ///
-    ///! postgres
+    /// postgres
     ///
     /// include:
     ///  a table name struct with field.
@@ -41,8 +45,8 @@ pub trait Generator {
     ///
     ///  # Examples
     /// ```
-    /// use sql_wrapper::generator::Generator;
-    /// use sql_wrapper::pg_generator;
+    /// use sqlx_model_gen::generator::Generator;
+    /// use sqlx_model_gen::pg_generator;
     ///     let gen = pg_generator::PgGenerator{};
     ///     let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
     ///     let table_name = "test_table";
@@ -51,73 +55,66 @@ pub trait Generator {
     /// ```
     /// after run , if success, test_table.rs file would generate.
     ///
-    fn gen_file(&self, conn_url: &str, table_name: &str) -> impl Future<Output = Result<(), sqlx::Error>> + Send where Self: Sync {
+    fn gen_struct_module(
+        &self,
+        conn_url: &str,
+        table_name: &str,
+        udt_mappings: Option<&HashMap<String, String>>,
+    ) -> impl std::future::Future<Output = Result<String, sqlx::Error>> + Send
+    where
+        Self: Sync,
+    {
         async move {
             let columns: Vec<ColumnInfo> = self.query_columns(conn_url, table_name).await;
 
             if columns.is_empty() {
-                println!("can not found columns. exit");
-                return Ok(());
+                return Err(sqlx::Error::TypeNotFound {
+                    type_name: table_name.to_string(),
+                });
             }
 
-            println!("columns:{:?}", columns);
-            let mut total_str = String::new();
+            println!("Columns: {:?}", columns);
 
-            let struct_str = self.gen_struct(table_name, &columns);
-            total_str.push_str(struct_str.as_str());
-
-            let insert_fn_str = self.gen_insert_returning_id_fn(table_name, &columns);
-            total_str.push_str(insert_fn_str.as_str());
-
-            let insert_fn_str = self.gen_insert_fn(table_name, &columns);
-            total_str.push_str(insert_fn_str.as_str());
-
-
-            let batch_insert_fn = self.gen_batch_insert_returning_id_fn(table_name, &columns);
-            total_str.push_str(batch_insert_fn.as_str());
-
-            let batch_insert_fn = self.gen_batch_insert_fn(table_name, &columns);
-            total_str.push_str(batch_insert_fn.as_str());
-
-            let select_sql = self.gen_select_sql_fn(table_name, &columns);
-            total_str.push_str(select_sql.as_str());
-
-            let select_by_id_fn = self.gen_select_by_id_fn(table_name, &columns);
-            total_str.push_str(select_by_id_fn.as_str());
-
-
-            let delete_by_id_fn = self.gen_delete_by_id_fn(table_name);
-            total_str.push_str(delete_by_id_fn.as_str());
-
-
-            std::fs::write(format!("{table_name}.rs"), total_str).unwrap();
-            Ok(())
+            Ok(self.gen_struct(table_name, &columns, udt_mappings))
         }
     }
-    fn get_mapping_type(&self, sql_type: &str) -> String;
 
-    fn gen_struct(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn get_mapping_type(&self, sql_type: &str, udt_mappings: &HashMap<String, String>) -> String;
+
+    fn gen_struct(
+        &self,
+        table_name: &str,
+        column_infos: &[ColumnInfo],
+        udt_mappings: Option<&HashMap<String, String>>,
+    ) -> String {
+        let udt_mappings: HashMap<String, String> = udt_mappings
+            .cloned()
+            .unwrap_or(HashMap::new())
+            .into_iter()
+            .map(|(k, v)| (k.to_uppercase(), v))
+            .collect();
+
         let mut st =
-            String::from_str("#[derive(sqlx::FromRow, Debug, PartialEq)] \npub struct ").unwrap();
+            String::from_str("#[derive(sqlx::FromRow, Clone, Debug, PartialEq)] \npub struct ")
+                .unwrap();
         st.push_str(self.gen_struct_name(table_name).as_str());
         st.push_str(" {\n");
         for c in column_infos {
             st.push_str("    pub ");
             st.push_str(c.column_name.as_str());
-            let ctype = self.get_mapping_type(c.data_type.as_str());
+            let ctype = self.get_mapping_type(c.udt_name.as_str(), &udt_mappings);
             st.push_str(": ");
-            if c.is_nullable == "NO" {
-                st.push_str(ctype.as_str());
-            } else {
+            if c.is_nullable {
                 st.push_str("Option<");
                 st.push_str(ctype.as_str());
-                st.push_str(">")
+                st.push('>')
+            } else {
+                st.push_str(ctype.as_str());
             }
             st.push_str(",\n");
         }
-        st.push_str("}\n\n\n");
-        println!("gen bean:\n{st}");
-        return st;
+        st.push_str("}\n");
+        st
     }
 
     fn gen_struct_name(&self, table: &str) -> String {
@@ -141,12 +138,10 @@ pub trait Generator {
             }
             idx += 1;
         }
-        println!("new name:{new_name}");
-        return new_name;
+        new_name
     }
 
-
-    fn gen_field_and_value_str(&self, column_infos: &Vec<ColumnInfo>, contain_id: bool) -> String {
+    fn gen_field_and_value_str(&self, column_infos: &[ColumnInfo], contain_id: bool) -> String {
         let mut ret = String::new();
 
         let mut fields = vec![];
@@ -155,12 +150,12 @@ pub trait Generator {
             if c.column_name == "id" && !contain_id {
                 continue;
             }
-            if c.is_nullable == "NO" {
-                fields.push(c.column_name.as_str());
-                values.push("obj.".to_string() + c.column_name.as_str())
-            } else {
+            if c.is_nullable {
                 fields.push(c.column_name.as_str());
                 values.push("obj.".to_string() + c.column_name.as_str() + ".unwrap()")
+            } else {
+                fields.push(c.column_name.as_str());
+                values.push("obj.".to_string() + c.column_name.as_str())
             }
         }
 
@@ -181,8 +176,11 @@ pub trait Generator {
         ret
     }
 
-
-    fn gen_field_and_batch_values_str(&self, column_infos: &Vec<ColumnInfo>, contain_id: bool) -> String {
+    fn gen_field_and_batch_values_str(
+        &self,
+        column_infos: &[ColumnInfo],
+        contain_id: bool,
+    ) -> String {
         let mut ret = String::new();
         let mut fields = vec![];
         let mut values = vec![];
@@ -190,12 +188,12 @@ pub trait Generator {
             if c.column_name == "id" && !contain_id {
                 continue;
             }
-            if c.is_nullable == "NO" {
-                fields.push(c.column_name.as_str());
-                values.push("obj.".to_string() + c.column_name.as_str())
-            } else {
+            if c.is_nullable {
                 fields.push(c.column_name.as_str());
                 values.push("obj.".to_string() + c.column_name.as_str() + ".unwrap()")
+            } else {
+                fields.push(c.column_name.as_str());
+                values.push("obj.".to_string() + c.column_name.as_str())
             }
         }
         for x in fields {
@@ -219,22 +217,30 @@ pub trait Generator {
         ret
     }
 
-    fn gen_insert_returning_id_fn(&self, _table_name: &str, _column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_insert_returning_id_fn(
+        &self,
+        _table_name: &str,
+        _column_infos: &[ColumnInfo],
+    ) -> String {
         String::new()
     }
-    fn gen_insert_fn(&self, _table_name: &str, _column_infos: &Vec<ColumnInfo>) -> String {
-        String::new()
-    }
-
-    fn gen_batch_insert_returning_id_fn(&self, _table_name: &str, _column_infos: &Vec<ColumnInfo>) -> String {
-        String::new()
-    }
-
-    fn gen_batch_insert_fn(&self, _table_name: &str, _column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_insert_fn(&self, _table_name: &str, _column_infos: &[ColumnInfo]) -> String {
         String::new()
     }
 
-    fn gen_select_sql(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_batch_insert_returning_id_fn(
+        &self,
+        _table_name: &str,
+        _column_infos: &[ColumnInfo],
+    ) -> String {
+        String::new()
+    }
+
+    fn gen_batch_insert_fn(&self, _table_name: &str, _column_infos: &[ColumnInfo]) -> String {
+        String::new()
+    }
+
+    fn gen_select_sql(&self, table_name: &str, column_infos: &[ColumnInfo]) -> String {
         let mut sql = String::from_str("select ").unwrap();
         for c in column_infos {
             sql.push_str(c.column_name.as_str());
@@ -246,15 +252,17 @@ pub trait Generator {
         sql
     }
 
-    fn gen_select_sql_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_select_sql_fn(&self, table_name: &str, column_infos: &[ColumnInfo]) -> String {
         let sql = self.gen_select_sql(table_name, column_infos);
-        format!(r#"
+        format!(
+            r#"
 pub fn select_sql() -> String {{
     "{sql}".to_string()
 }}
-        "#)
+        "#
+        )
     }
-    fn gen_select_by_id_fn(&self, _table_name: &str, _column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_select_by_id_fn(&self, _table_name: &str, _column_infos: &[ColumnInfo]) -> String {
         String::new()
     }
 
@@ -265,7 +273,4 @@ pub fn select_sql() -> String {{
     fn gen_delete_by_id_fn(&self, _table_name: &str) -> String {
         String::new()
     }
-
 }
-
-

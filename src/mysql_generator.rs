@@ -1,81 +1,72 @@
-use sqlx::{Connection, MySqlConnection};
-use crate::generator::{ColumnInfo, Generator};
+use std::collections::HashMap;
 
+use crate::generator::{ColumnInfo, Generator};
+use sqlx::{Connection, MySqlConnection};
 
 pub struct MysqlGenerator {}
 
 impl Generator for MysqlGenerator {
+    async fn get_tables(&self, conn_url: &str, schema: &str) -> Vec<String> {
+        let mut conn: MySqlConnection = MySqlConnection::connect(conn_url).await.unwrap();
+        let sql =
+            format!("select table_name from information_schema.tables where table_schema = $1;");
+        sqlx::query_scalar(sql.as_str())
+            .bind(schema)
+            .fetch_all(&mut conn)
+            .await
+            .expect("Failed to query mysql tables")
+    }
+
     async fn query_columns(&self, conn_url: &str, table_name: &str) -> Vec<ColumnInfo> {
         let mut conn: MySqlConnection = MySqlConnection::connect(conn_url).await.unwrap();
-        let sql = format!(r#"select COLUMN_NAME as column_name, ORDINAL_POSITION as ordinal_position,
-     IS_NULLABLE as is_nullable, DATA_TYPE as data_type, CHARACTER_MAXIMUM_LENGTH as character_maximum_length
-      from information_schema.columns where table_name = '{table_name}' order by ordinal_position asc; "#);
+        let sql = format!(
+            r#"select COLUMN_NAME as column_name, ORDINAL_POSITION as ordinal_position,
+     IS_NULLABLE = 'YES' as is_nullable, DATA_TYPE as data_type, CHARACTER_MAXIMUM_LENGTH as character_maximum_length
+      from information_schema.columns where table_name = '{table_name}' order by ordinal_position asc; "#
+        );
 
-        let columns: Vec<ColumnInfo> = sqlx::query_as(sql.as_str()).fetch_all(&mut conn).await.unwrap();
-        return columns;
+        let columns: Vec<ColumnInfo> = sqlx::query_as(sql.as_str())
+            .fetch_all(&mut conn)
+            .await
+            .unwrap();
+        columns
     }
 
-    fn get_mapping_type(&self, sql_type: &str) -> String {
-        let sql_type = sql_type.to_uppercase();
-        let ret = if sql_type == "TINYINT" {
-            "i8"
-        } else if sql_type == "SMALLINT" {
-            "i16"
-        } else if sql_type == "INT" {
-            "i32"
-        } else if sql_type == "SERIAL" {
-            "i32"
-        } else if sql_type == "BIGINT" {
-            "i64"
-        } else if sql_type == "TINYINT UNSIGNED" {
-            "u8"
-        } else if sql_type == "SMALLINT UNSIGNED" {
-            "u16"
-        } else if sql_type == "INT UNSIGNED" {
-            "u32"
-        } else if sql_type == "BIGINT UNSIGNED" {
-            "u64"
-        } else if sql_type == "FLOAT" {
-            "f32"
-        } else if sql_type == "DOUBLE" {
-            "f64"
-        } else if sql_type == "VARCHAR" {
-            "String"
-        } else if sql_type == "TEXT" || sql_type == "TINYTEXT" || sql_type == "LONGTEXT" || sql_type == "MEDIUMTEXT" {
-            "String"
-        } else if sql_type == "CHAR" {
-            "String"
-        } else if sql_type == "VARBINARY" {
-            "Vec<u8>"
-        } else if sql_type == "BINARY" {
-            "Vec<u8>"
-        } else if sql_type == "BLOB" ||  sql_type == "LONGBLOB" ||  sql_type == "MEDIUMBLOB" || sql_type == "TINYBLOB" {
-            "Vec<u8>"
-        } else if sql_type == "TIMESTAMP" {
-            "chrono::DateTime<chrono::Local>"
-        } else if sql_type == "DATETIME" {
-            "chrono::NaiveDateTime"
-        } else if sql_type == "DATE" {
-            "chrono::NaiveDate"
-        } else if sql_type == "TIME" {
-            "chrono::NaiveTime"
-        } else if sql_type == "DECIMAL" {
-            "sqlx::types::Decimal"
-        } else if sql_type == "UUID" {
-            "uuid::Uuid"
-        } else if sql_type == "JSON" {
-            "serde_json::Value"
-        } else {
-            panic!("{}", format!("not support type:{}", sql_type))
-        };
-        ret.to_string()
+    fn get_mapping_type(&self, sql_type: &str, udt_mappings: &HashMap<String, String>) -> String {
+        match sql_type.to_uppercase().as_str() {
+            "TINYINT" => "i8",
+            "SMALLINT" => "i16",
+            "INT" | "SERIAL" => "i32",
+            "OID" => "i32",
+            "BIGINT" => "i64",
+            "TINYINT UNSIGNED" => "u8",
+            "SMALLINT UNSIGNED" => "u16",
+            "INT UNSIGNED" => "u32",
+            "BIGINT UNSIGNED" => "u64",
+            "FLOAT" => "f32",
+            "DOUBLE" => "f64",
+            "CHAR" | "VARCHAR" => "String",
+            "TEXT" | "TINYTEXT" | "LONGTEXT" | "MEDIUMTEXT" => "String",
+            "BINARY" | "VARBINARY" => "Vec<u8>",
+            "BLOB" | "LONGBLOB" | "MEDIUMBLOB" | "TINYBLOB" => "Vec<u8>",
+            "TIMESTAMP" => "chrono::DateTime<chrono::Local>",
+            "DATETIME" => "chrono::NaiveDateTime",
+            "DATE" => "chrono::NaiveDate",
+            "TIME" => "chrono::NaiveTime",
+            "DECIMAL" => "sqlx::types::Decimal",
+            "UUID" => "uuid::Uuid",
+            "JSON" => "serde_json::Value",
+            _ => panic!("{}", format!("Unsupported Type: {}", sql_type)),
+        }
+        .to_string()
     }
 
-    fn gen_insert_returning_id_fn(&self,table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_insert_returning_id_fn(&self, table_name: &str, column_infos: &[ColumnInfo]) -> String {
         let struct_name = self.gen_struct_name(table_name);
         let ret = self.gen_field_and_value_str(column_infos, false);
 
-        let fn_str = format!(r#"
+        format!(
+            r#"
 pub async fn insert_returning_id(conn: &mut sqlx::MySqlConnection, obj: {struct_name}) -> i64 {{
     let mut sql = sql_builder::SqlBuilder::insert_into("{table_name}");
 {ret}
@@ -87,16 +78,16 @@ pub async fn insert_returning_id(conn: &mut sqlx::MySqlConnection, obj: {struct_
    println!("insert failed:{{:?}}", result);
    return -1;
 }}
-    "#);
-
-        return fn_str
+    "#
+        )
     }
 
-    fn gen_insert_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_insert_fn(&self, table_name: &str, column_infos: &[ColumnInfo]) -> String {
         let struct_name = self.gen_struct_name(table_name);
         let ret = self.gen_field_and_value_str(column_infos, true);
 
-        let fn_str = format!(r#"
+        format!(
+            r#"
 pub async fn insert(conn: &mut sqlx::MySqlConnection, obj: {struct_name}) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error>  {{
     let mut sql = sql_builder::SqlBuilder::insert_into("{table_name}");
 {ret}
@@ -104,15 +95,20 @@ pub async fn insert(conn: &mut sqlx::MySqlConnection, obj: {struct_name}) -> Res
     sqlx::query(sql.as_str()).execute(conn).await
 
 }}
-    "#);
-
-        return fn_str
+    "#
+        )
     }
 
-    fn gen_batch_insert_returning_id_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_batch_insert_returning_id_fn(
+        &self,
+        table_name: &str,
+        column_infos: &[ColumnInfo],
+    ) -> String {
         let struct_name = self.gen_struct_name(table_name);
         let ret = self.gen_field_and_batch_values_str(column_infos, false);
-        let fn_str = format!(r#"
+
+        format!(
+            r#"
 
 pub async fn batch_insert_returning_id(conn: &mut sqlx::MySqlConnection, objs: Vec<{struct_name}>) -> Vec<i64> {{
     let len = objs.len();
@@ -134,17 +130,17 @@ pub async fn batch_insert_returning_id(conn: &mut sqlx::MySqlConnection, objs: V
     return vec![]
 
 }}
-    "#);
-
-        fn_str
+    "#
+        )
     }
 
-    fn gen_batch_insert_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_batch_insert_fn(&self, table_name: &str, column_infos: &[ColumnInfo]) -> String {
         let struct_name = self.gen_struct_name(table_name);
 
         let ret = self.gen_field_and_batch_values_str(column_infos, true);
 
-        let fn_str = format!(r#"
+        format!(
+            r#"
 
 pub async fn batch_insert(conn: &mut sqlx::MySqlConnection, objs: Vec<{struct_name}>) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error>  {{
     let mut sql = sql_builder::SqlBuilder::insert_into("{table_name}");
@@ -154,56 +150,58 @@ pub async fn batch_insert(conn: &mut sqlx::MySqlConnection, objs: Vec<{struct_na
     sqlx::query(sql.as_str()).execute(conn).await
 
 }}
-    "#);
-
-        fn_str
+    "#
+        )
     }
 
-    fn gen_select_by_id_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_select_by_id_fn(&self, table_name: &str, column_infos: &[ColumnInfo]) -> String {
         let sql = self.gen_select_sql(table_name, column_infos);
         let struct_name = self.gen_struct_name(table_name);
-        format!(r#"
+
+        format!(
+            r#"
 pub async fn select_by_id(conn: &mut sqlx::MySqlConnection,id: i64) -> Result<{struct_name}, sqlx::Error> {{
     let sql = format!("{sql} where id='{{}}'", id);
     let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
     result
 }}
 
-        "#)
+        "#
+        )
     }
 
     fn gen_delete_by_id_fn(&self, _table_name: &str) -> String {
         let sql = self.gen_delete_by_id_sql(_table_name);
-        format!(r#"
+
+        format!(
+            r#"
 pub async fn delete_by_id(conn: &mut sqlx::MySqlConnection,id: i64) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error> {{
     let sql = format!("{sql}'{{}}'", id);
     sqlx::query(sql.as_str()).execute(conn).await
 }}
-        "#)
+        "#
+        )
     }
 }
 
-
-
-
-
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-    use std::time::SystemTime;
-    use chrono::{DateTime, NaiveDate, NaiveDateTime};
-    use sqlx::{Connection, MySqlConnection};
-    use sqlx::types::Decimal;
     use crate::field_to_string::FieldToString;
     use crate::generator::Generator;
     use crate::mysql_generator::MysqlGenerator;
+    use chrono::{DateTime, NaiveDate, NaiveDateTime};
+    use core::f64;
+    use sqlx::types::Decimal;
+    use sqlx::{Connection, MySqlConnection};
+    use std::str::FromStr;
+    use std::time::SystemTime;
 
     #[tokio::test]
     async fn gen_file_test() {
         let conn_url = "mysql://root:123456@localhost/test_db";
         let table_name = "test_table";
-        let gen = MysqlGenerator{};
-        let result = gen.gen_file(conn_url, table_name).await;
+        let gen = MysqlGenerator {};
+        let result = gen.gen_struct_module(conn_url, table_name, None).await;
         println!("result:{:?}", result)
     }
 
@@ -240,7 +238,6 @@ mod test {
         println!("insert result:{:?}", result);
     }
 
-
     #[tokio::test]
     async fn batch_insert_returning_id_test() {
         let conn_url = "mysql://root:123456@localhost/test_db";
@@ -250,7 +247,6 @@ mod test {
         let result = batch_insert_returning_id(&mut conn, vec![obj1, obj2]).await;
         println!("insert result:{:?}", result);
     }
-
 
     #[tokio::test]
     async fn select_by_id_test() {
@@ -278,7 +274,7 @@ mod test {
             i4: 44,
             i41: Some(455),
             r1: 0.0,
-            r2: Some(3.14),
+            r2: Some(f64::consts::PI),
             d1: 0.0,
             d2: Some(345.0),
             t1: "4".to_string(),
@@ -290,14 +286,14 @@ mod test {
             t4: Some("adf".to_string()),
             byte1: Some(Vec::from("안녕하세요你好こんにちはЗдравствуйте💖💖💖💖💖")),
             blob4: Some(Vec::from("안녕하세요你好こんにちはЗдравствуйте💖💖💖💖💖")),
-            big1: Some(Decimal::new(234,1)),
-            blob2: Some(vec![3,4,5]),
+            big1: Some(Decimal::new(234, 1)),
+            blob2: Some(vec![3, 4, 5]),
             big2: Some(Decimal::new(223434, 2)),
-            ts1:  DateTime::from(SystemTime::now()),
+            ts1: DateTime::from(SystemTime::now()),
             date1: Some(NaiveDate::default()),
             time1: Default::default(),
             i5: Some(12),
-            blob3: Some(vec![3,4,5]),
+            blob3: Some(vec![3, 4, 5]),
             dt: NaiveDateTime::from_str("2015-09-18T23:56:04").unwrap(),
         }
     }
@@ -333,8 +329,6 @@ mod test {
         time1: chrono::NaiveTime,
         i5: Option<i16>,
     }
-
-
 
     pub async fn insert_returning_id(conn: &mut sqlx::MySqlConnection, obj: TestTable) -> i64 {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
@@ -394,19 +388,24 @@ mod test {
             sql_builder::quote(obj.dt.field_to_string()),
             sql_builder::quote(obj.date1.unwrap().field_to_string()),
             sql_builder::quote(obj.time1.field_to_string()),
-            sql_builder::quote(obj.i5.unwrap().field_to_string())
+            sql_builder::quote(obj.i5.unwrap().field_to_string()),
         ]);
 
         let sql = sql.sql().unwrap();
-        let  result = sqlx::query(sql.as_str()).execute(conn).await;
-        if result.is_ok() {
-            return result.unwrap().last_insert_id() as i64;
+        let result = sqlx::query(sql.as_str()).execute(conn).await;
+        match result {
+            Ok(result) => result.last_insert_id() as i64,
+            Err(error) => {
+                println!("Insert failed: {:?}", error);
+                -1
+            }
         }
-        println!("insert failed:{:?}", result);
-        return -1;
     }
 
-    pub async fn insert(conn: &mut sqlx::MySqlConnection, obj: TestTable) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error>  {
+    pub async fn insert(
+        conn: &mut sqlx::MySqlConnection,
+        obj: TestTable,
+    ) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error> {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
         sql.field("id");
         sql.field("b1");
@@ -466,16 +465,17 @@ mod test {
             sql_builder::quote(obj.dt.field_to_string()),
             sql_builder::quote(obj.date1.unwrap().field_to_string()),
             sql_builder::quote(obj.time1.field_to_string()),
-            sql_builder::quote(obj.i5.unwrap().field_to_string())
+            sql_builder::quote(obj.i5.unwrap().field_to_string()),
         ]);
 
         let sql = sql.sql().unwrap();
         sqlx::query(sql.as_str()).execute(conn).await
-
     }
 
-
-    pub async fn batch_insert_returning_id(conn: &mut sqlx::MySqlConnection, objs: Vec<TestTable>) -> Vec<i64> {
+    pub async fn batch_insert_returning_id(
+        conn: &mut sqlx::MySqlConnection,
+        objs: Vec<TestTable>,
+    ) -> Vec<i64> {
         let len = objs.len();
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
         sql.field("b1");
@@ -535,29 +535,34 @@ mod test {
                 sql_builder::quote(obj.dt.field_to_string()),
                 sql_builder::quote(obj.date1.unwrap().field_to_string()),
                 sql_builder::quote(obj.time1.field_to_string()),
-                sql_builder::quote(obj.i5.unwrap().field_to_string())
+                sql_builder::quote(obj.i5.unwrap().field_to_string()),
             ]);
         }
 
-
         let sql = sql.sql().unwrap();
         let result = sqlx::query(sql.as_str()).execute(conn).await;
-        if result.is_ok() {
-            let last_id = result.unwrap().last_insert_id() as i64;
-            println!("last id:{last_id}");
-            let mut list = vec![];
-            for idx in 0..len {
-                list.push(last_id - len as i64 + idx as i64 + 1)
-            }
-            return list;
-        }
-        println!("insert failed:{:?}", result);
-        return vec![]
 
+        match result {
+            Ok(result) => {
+                let last_id = result.last_insert_id() as i64;
+                println!("last id:{last_id}");
+                let mut list = vec![];
+                for idx in 0..len {
+                    list.push(last_id - len as i64 + idx as i64 + 1)
+                }
+                list
+            }
+            Err(error) => {
+                println!("insert failed:{:?}", error);
+                vec![]
+            }
+        }
     }
 
-
-    pub async fn batch_insert(conn: &mut sqlx::MySqlConnection, objs: Vec<TestTable>) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error>  {
+    pub async fn batch_insert(
+        conn: &mut sqlx::MySqlConnection,
+        objs: Vec<TestTable>,
+    ) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error> {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
         sql.field("id");
         sql.field("b1");
@@ -618,30 +623,33 @@ mod test {
                 sql_builder::quote(obj.dt.field_to_string()),
                 sql_builder::quote(obj.date1.unwrap().field_to_string()),
                 sql_builder::quote(obj.time1.field_to_string()),
-                sql_builder::quote(obj.i5.unwrap().field_to_string())
+                sql_builder::quote(obj.i5.unwrap().field_to_string()),
             ]);
         }
 
-
         let sql = sql.sql().unwrap();
         sqlx::query(sql.as_str()).execute(conn).await
-
     }
 
+    #[allow(unused)]
     pub fn select_sql() -> String {
         "select id, b1, b2, c1, c2, i4, i41, r1, r2, d1, d2, t1, tx1, tx2, tx3, t2, t3, t4, byte1, blob4, blob3, big1, blob2, big2, ts1, dt, date1, time1, i5  from test_table".to_string()
     }
 
-    pub async fn select_by_id(conn: &mut sqlx::MySqlConnection,id: i64) -> Result<TestTable, sqlx::Error> {
+    pub async fn select_by_id(
+        conn: &mut sqlx::MySqlConnection,
+        id: i64,
+    ) -> Result<TestTable, sqlx::Error> {
         let sql = format!("select id, b1, b2, c1, c2, i4, i41, r1, r2, d1, d2, t1, tx1, tx2, tx3, t2, t3, t4, byte1, blob4, blob3, big1, blob2, big2, ts1, dt, date1, time1, i5  from test_table where id='{}'", id);
-        let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
-        result
+
+        sqlx::query_as(sql.as_str()).fetch_one(conn).await
     }
 
-
-    pub async fn delete_by_id(conn: &mut sqlx::MySqlConnection,id: i64) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error> {
+    pub async fn delete_by_id(
+        conn: &mut sqlx::MySqlConnection,
+        id: i64,
+    ) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error> {
         let sql = format!("delete from test_table where id='{}'", id);
         sqlx::query(sql.as_str()).execute(conn).await
     }
-
 }

@@ -1,93 +1,98 @@
-use sqlx::{Connection, PgConnection};
+use std::collections::HashMap;
+
 use crate::generator::{ColumnInfo, Generator};
+use sqlx::{Connection, PgConnection};
 
 pub struct PgGenerator;
 
 impl Generator for PgGenerator {
+    async fn get_tables(&self, conn_url: &str, schema: &str) -> Vec<String> {
+        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let sql =
+            "select table_name from information_schema.tables where table_schema = $1;".to_string();
+        sqlx::query_scalar(sql.as_str())
+            .bind(schema)
+            .fetch_all(&mut conn)
+            .await
+            .expect("Failed to query postgres tables")
+    }
+
     async fn query_columns(&self, conn_url: &str, table_name: &str) -> Vec<ColumnInfo> {
         let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
-        let sql = format!("select * from information_schema.columns where table_name = '{table_name}' order by ordinal_position asc; ");
-        let columns: Vec<ColumnInfo> = sqlx::query_as(sql.as_str()).fetch_all(&mut conn).await.unwrap();
-        return columns;
+        let sql = format!("select column_name, udt_name, is_nullable = 'YES' AS is_nullable from information_schema.columns where table_name = '{table_name}' order by ordinal_position asc; ");
+        let columns: Vec<ColumnInfo> = sqlx::query_as(sql.as_str())
+            .fetch_all(&mut conn)
+            .await
+            .unwrap();
+        columns
     }
 
-    fn get_mapping_type(&self, sql_type: &str) -> String {
+    fn get_mapping_type(&self, sql_type: &str, udt_mappings: &HashMap<String, String>) -> String {
         let sql_type = sql_type.to_uppercase();
-        let ret = if sql_type == "BOOLEAN" {
-            "bool"
-        } else if sql_type == "CHARACTER" {
-            "String"
-        } else if sql_type == "SMALLINT" {
-            "i16"
-        } else if sql_type == "SMALLSERIAL" {
-            "i16"
-        } else if sql_type == "INT2" {
-            "i16"
-        } else if sql_type == "INT" {
-            "i32"
-        } else if sql_type == "SERIAL" {
-            "i32"
-        } else if sql_type == "INTEGER" {
-            "i32"
-        } else if sql_type == "INT4" {
-            "i32"
-        } else if sql_type == "BIGINT" {
-            "i64"
-        } else if sql_type == "BIGSERIAL" {
-            "i64"
-        } else if sql_type == "INT8" {
-            "i64"
-        } else if sql_type == "REAL" {
-            "f32"
-        } else if sql_type == "FLOAT4" {
-            "f32"
-        } else if sql_type == "DOUBLE PRECISION" {
-            "f64"
-        } else if sql_type == "FLOAT8" {
-            "f64"
-        } else if sql_type == "CHARACTER VARYING" {
-            "String"
-        } else if sql_type == "TEXT" {
-            "String"
-        } else if sql_type == "NAME" {
-            "String"
-        } else if sql_type == "CITEXT" {
-            "String"
-        } else if sql_type == "BYTEA" {
-            "Vec<u8>"
-        } else if sql_type == "VOID" {
-            "()"
-        } else if sql_type == "INTERVAL" {
-            "sqlx::postgres::types::PgInterval"
-        } else if sql_type == "NUMERIC" {
-            "sqlx::types::Decimal"
-        } else if sql_type == "TIMESTAMP WITH TIME ZONE" {
-            "chrono::DateTime<chrono::Utc>"
-        } else if sql_type == "TIMESTAMP WITHOUT TIME ZONE" {
-            "chrono::NaiveDateTime"
-        } else if sql_type == "DATE" {
-            "chrono::NaiveDate"
-        } else if sql_type == "TIME WITHOUT TIME ZONE" {
-            "chrono::NaiveTime"
-        } else if sql_type == "TIME WITH TIME ZONE" {
-            "sqlx::postgres::types::PgTimeTz"
-        } else if sql_type == "UUID" {
-            "uuid::Uuid"
-        } else if sql_type == "JSON" {
-            "serde_json::Value"
-        } else if sql_type == "JSONB" {
-            "serde_json::Value"
-        } else {
-            panic!("{}", format!("not support type:{}", sql_type))
-        };
-        ret.to_string()
+
+        if sql_type.contains("char(") {
+            return "String".to_string();
+        }
+
+        if sql_type.starts_with("numeric") {
+            return "sqlx::types::BigDecimal".to_string();
+        }
+
+        if let Some(array_of_type) = sql_type.strip_prefix('_') {
+            return format!(
+                "Vec<{}>",
+                self.get_mapping_type(array_of_type, udt_mappings)
+            );
+        }
+
+        match sql_type.as_str() {
+            "BIGINT" => "i64",
+            "BIGSERIAL" => "i64",
+            "BOOL" | "BOOLEAN" => "bool",
+            "BYTEA" => "Vec<u8>",
+            "CHAR" | "BPCHAR" | "CHARACTER" => "String",
+            "DATE" => "chrono::NaiveDate",
+            "DOUBLE" => "f64",
+            "FLOAT4" => "f32",
+            "REAL" => "f32",
+            "FLOAT8" => "f64",
+            "DOUBLE PRECISION" => "f64",
+            "INT" => "i32",
+            "INT2" => "i16",
+            "INT4" => "i32",
+            "INT8" => "i64",
+            "INTEGER" => "i32",
+            "INTERVAL" => "sqlx::postgres::types::PgInterval",
+            "JSON" => "serde_json::Value",
+            "JSONB" => "serde_json::Value",
+            "NUMERIC" => "sqlx::types::Decimal",
+            "OID" => "i32",
+            "SERIAL" => "i32",
+            "SMALLINT" => "i16",
+            "SMALLSERIAL" => "i16",
+            "TEXT" | "VARCHAR" | "NAME" | "CITEXT" => "String",
+            "TIME WITH TIME ZONE" => "sqlx::postgres::types::PgTimeTz",
+            "TIME WITHOUT TIME ZONE" => "chrono::NaiveTime",
+            "TIME" => "chrono::NaiveTime",
+            "TIMESTAMP WITH TIME ZONE" => "chrono::DateTime<chrono::Utc>",
+            "TIMESTAMP WITHOUT TIME ZONE" => "chrono::NaiveDateTime",
+            "TIMESTAMP" => "chrono::NaiveDateTime",
+            "TIMESTAMPTZ" => "chrono::DateTime<chrono::Utc>",
+            "UUID" => "uuid::Uuid",
+            "VOID" => "()",
+            _ => udt_mappings.get(&sql_type).unwrap_or_else(|| {
+                panic!("Unsupported type: {}", sql_type);
+            }),
+        }
+        .to_string()
     }
 
-    fn gen_insert_returning_id_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_insert_returning_id_fn(&self, table_name: &str, column_infos: &[ColumnInfo]) -> String {
         let struct_name = self.gen_struct_name(table_name);
         let ret = self.gen_field_and_value_str(column_infos, false);
 
-        let fn_str = format!(r#"
+        let fn_str = format!(
+            r#"
 pub async fn insert_returning_id(conn: &mut PgConnection, obj: {struct_name}) -> i64 {{
     let mut sql = sql_builder::SqlBuilder::insert_into("{table_name}");
 {ret}
@@ -96,16 +101,18 @@ pub async fn insert_returning_id(conn: &mut PgConnection, obj: {struct_name}) ->
     let columns:(i64,) = sqlx::query_as(sql.as_str()).fetch_one(conn).await.unwrap();
     return columns.0
 }}
-    "#);
+    "#
+        );
 
-        return fn_str
+        fn_str
     }
 
-    fn gen_insert_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_insert_fn(&self, table_name: &str, column_infos: &[ColumnInfo]) -> String {
         let struct_name = self.gen_struct_name(table_name);
         let ret = self.gen_field_and_value_str(column_infos, true);
 
-        let fn_str = format!(r#"
+        let fn_str = format!(
+            r#"
 pub async fn insert(conn: &mut PgConnection, obj: {struct_name}) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>  {{
     let mut sql = sql_builder::SqlBuilder::insert_into("{table_name}");
 {ret}
@@ -113,17 +120,23 @@ pub async fn insert(conn: &mut PgConnection, obj: {struct_name}) -> Result<sqlx:
     sqlx::query(sql.as_str()).execute(conn).await
 
 }}
-    "#);
+    "#
+        );
 
-        return fn_str
+        fn_str
     }
 
-    fn gen_batch_insert_returning_id_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_batch_insert_returning_id_fn(
+        &self,
+        table_name: &str,
+        column_infos: &[ColumnInfo],
+    ) -> String {
         let struct_name = self.gen_struct_name(table_name);
 
         let ret = self.gen_field_and_batch_values_str(column_infos, false);
 
-        let fn_str = format!(r#"
+        let fn_str = format!(
+            r#"
 
 pub async fn batch_insert_returning_id(conn: &mut PgConnection, objs: Vec<{struct_name}>) -> Vec<i64> {{
     let mut sql = sql_builder::SqlBuilder::insert_into("{table_name}");
@@ -140,17 +153,19 @@ pub async fn batch_insert_returning_id(conn: &mut PgConnection, objs: Vec<{struc
     return ret;
 
 }}
-    "#);
+    "#
+        );
 
         fn_str
     }
 
-    fn gen_batch_insert_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_batch_insert_fn(&self, table_name: &str, column_infos: &[ColumnInfo]) -> String {
         let struct_name = self.gen_struct_name(table_name);
 
         let ret = self.gen_field_and_batch_values_str(column_infos, true);
 
-        let fn_str = format!(r#"
+        let fn_str = format!(
+            r#"
 
 pub async fn batch_insert(conn: &mut PgConnection, objs: Vec<{struct_name}>) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>  {{
     let mut sql = sql_builder::SqlBuilder::insert_into("{table_name}");
@@ -160,46 +175,51 @@ pub async fn batch_insert(conn: &mut PgConnection, objs: Vec<{struct_name}>) -> 
     sqlx::query(sql.as_str()).execute(conn).await
 
 }}
-    "#);
+    "#
+        );
 
         fn_str
     }
 
-    fn gen_select_by_id_fn(&self, table_name: &str, column_infos: &Vec<ColumnInfo>) -> String {
+    fn gen_select_by_id_fn(&self, table_name: &str, column_infos: &[ColumnInfo]) -> String {
         let sql = self.gen_select_sql(table_name, column_infos);
         let struct_name = self.gen_struct_name(table_name);
-        format!(r#"
+        format!(
+            r#"
 pub async fn select_by_id(conn: &mut PgConnection,id: i64) -> Result<{struct_name}, sqlx::Error> {{
     let sql = format!("{sql} where id='{{}}'", id);
     let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
     result
 }}
 
-        "#)
+        "#
+        )
     }
 
     fn gen_delete_by_id_fn(&self, table_name: &str) -> String {
         let sql = self.gen_delete_by_id_sql(table_name);
-        format!(r#"
+        format!(
+            r#"
 pub async fn delete_by_id(conn: &mut PgConnection,id: i64) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {{
     let sql = format!("{sql} '{{}}'", id);
     sqlx::query(sql.as_str()).execute(conn).await
 }}
-        "#)
+        "#
+        )
     }
 }
 
-
 #[cfg(test)]
 mod test {
-    use std::time::SystemTime;
-    use chrono::{DateTime, FixedOffset, Utc};
-    use sqlx::{Connection, PgConnection};
-    use sqlx::postgres::types::{PgInterval, PgTimeTz};
-    use sqlx::types::Decimal;
     use crate::field_to_string::FieldToString;
     use crate::generator::Generator;
     use crate::pg_generator::PgGenerator;
+    use chrono::{DateTime, FixedOffset, Utc};
+    use core::f64;
+    use sqlx::postgres::types::{PgInterval, PgTimeTz};
+    use sqlx::types::Decimal;
+    use sqlx::{Connection, PgConnection};
+    use std::time::SystemTime;
     #[derive(sqlx::FromRow, Debug, PartialEq)]
     pub struct TestTable {
         id: i64,
@@ -232,8 +252,6 @@ mod test {
         json2: Option<serde_json::Value>,
         i5: Option<i16>,
     }
-
-
 
     pub async fn insert_returning_id(conn: &mut PgConnection, obj: TestTable) -> i64 {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
@@ -293,16 +311,19 @@ mod test {
             sql_builder::quote(obj.uid1.field_to_string()),
             sql_builder::quote(obj.json1.unwrap().field_to_string()),
             sql_builder::quote(obj.json2.unwrap().field_to_string()),
-            sql_builder::quote(obj.i5.unwrap().field_to_string())
+            sql_builder::quote(obj.i5.unwrap().field_to_string()),
         ]);
 
         sql.returning_id();
         let sql = sql.sql().unwrap();
-        let columns:(i64,) = sqlx::query_as(sql.as_str()).fetch_one(conn).await.unwrap();
-        return columns.0
+        let columns: (i64,) = sqlx::query_as(sql.as_str()).fetch_one(conn).await.unwrap();
+        columns.0
     }
 
-    pub async fn insert(conn: &mut PgConnection, obj: TestTable) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>  {
+    pub async fn insert(
+        conn: &mut PgConnection,
+        obj: TestTable,
+    ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
         sql.field("id");
         sql.field("b1");
@@ -362,16 +383,17 @@ mod test {
             sql_builder::quote(obj.uid1.field_to_string()),
             sql_builder::quote(obj.json1.unwrap().field_to_string()),
             sql_builder::quote(obj.json2.unwrap().field_to_string()),
-            sql_builder::quote(obj.i5.unwrap().field_to_string())
+            sql_builder::quote(obj.i5.unwrap().field_to_string()),
         ]);
 
         let sql = sql.sql().unwrap();
         sqlx::query(sql.as_str()).execute(conn).await
-
     }
 
-
-    pub async fn batch_insert_returning_id(conn: &mut PgConnection, objs: Vec<TestTable>) -> Vec<i64> {
+    pub async fn batch_insert_returning_id(
+        conn: &mut PgConnection,
+        objs: Vec<TestTable>,
+    ) -> Vec<i64> {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
         sql.field("b1");
         sql.field("b2");
@@ -430,25 +452,25 @@ mod test {
                 sql_builder::quote(obj.uid1.field_to_string()),
                 sql_builder::quote(obj.json1.unwrap().field_to_string()),
                 sql_builder::quote(obj.json2.unwrap().field_to_string()),
-                sql_builder::quote(obj.i5.unwrap().field_to_string())
+                sql_builder::quote(obj.i5.unwrap().field_to_string()),
             ]);
         }
 
-
         sql.returning_id();
         let sql = sql.sql().unwrap();
-        let columns:Vec<(i64,)> = sqlx::query_as(sql.as_str()).fetch_all(conn).await.unwrap();
+        let columns: Vec<(i64,)> = sqlx::query_as(sql.as_str()).fetch_all(conn).await.unwrap();
         let mut ret = vec![];
         for v in columns {
             ret.push(v.0)
         }
         println!("insert id:{:?}", ret);
-        return ret;
-
+        ret
     }
 
-
-    pub async fn batch_insert(conn: &mut PgConnection, objs: Vec<TestTable>) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>  {
+    pub async fn batch_insert(
+        conn: &mut PgConnection,
+        objs: Vec<TestTable>,
+    ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
         let mut sql = sql_builder::SqlBuilder::insert_into("test_table");
         sql.field("id");
         sql.field("b1");
@@ -509,45 +531,45 @@ mod test {
                 sql_builder::quote(obj.uid1.field_to_string()),
                 sql_builder::quote(obj.json1.unwrap().field_to_string()),
                 sql_builder::quote(obj.json2.unwrap().field_to_string()),
-                sql_builder::quote(obj.i5.unwrap().field_to_string())
+                sql_builder::quote(obj.i5.unwrap().field_to_string()),
             ]);
         }
 
-
         let sql = sql.sql().unwrap();
         sqlx::query(sql.as_str()).execute(conn).await
-
     }
 
+    #[allow(unused)]
     pub fn select_sql() -> String {
         "select id, b1, b2, c1, c2, i4, i41, r1, r2, d1, d2, t1, t2, t3, t4, byte1, interval1, big1, big2, ts1, ts2, date1, date2, time1, time2, uid1, json1, json2, i5  from test_table".to_string()
     }
 
-    pub async fn select_by_id(conn: &mut PgConnection,id: i64) -> Result<TestTable, sqlx::Error> {
+    pub async fn select_by_id(conn: &mut PgConnection, id: i64) -> Result<TestTable, sqlx::Error> {
         let sql = format!("select id, b1, b2, c1, c2, i4, i41, r1, r2, d1, d2, t1, t2, t3, t4, byte1, interval1, big1, big2, ts1, ts2, date1, date2, time1, time2, uid1, json1, json2, i5  from test_table where id='{}'", id);
-        let result = sqlx::query_as(sql.as_str()).fetch_one(conn).await;
-        result
+
+        sqlx::query_as(sql.as_str()).fetch_one(conn).await
     }
 
-    pub async fn delete_by_id(conn: &mut PgConnection,id: i64) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+    pub async fn delete_by_id(
+        conn: &mut PgConnection,
+        id: i64,
+    ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
         let sql = format!("delete from test_table where id= '{}'", id);
         sqlx::query(sql.as_str()).execute(conn).await
     }
 
-
     #[test]
     fn name_struct_test() {
         let name = "group_history";
-        let gen = PgGenerator{};
+        let gen = PgGenerator {};
         gen.gen_struct_name(name);
     }
 
     #[tokio::test]
     async fn select_test() {
-
         let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
         let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
-        let sql = format!("select * from test_table");
+        let sql = "select * from test_table".to_string();
 
         let columns: Vec<TestTable> = sqlx::query_as(sql.as_str())
             .fetch_all(&mut conn)
@@ -559,16 +581,15 @@ mod test {
     #[test]
     fn to_string_test() {
         let now: DateTime<Utc> = DateTime::from(SystemTime::now());
-        println!("now:{}", now.to_string())
+        println!("now:{}", now)
     }
-
 
     #[tokio::test]
     async fn gen_file_test() {
-        let gen = PgGenerator{};
+        let gen = PgGenerator {};
         let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
         let table_name = "test_table";
-        let result = gen.gen_file(conn_url, table_name).await;
+        let result = gen.gen_struct_module(conn_url, table_name, None).await;
         println!("result:{:?}", result)
     }
 
@@ -632,7 +653,6 @@ mod test {
         println!("{:?}", result)
     }
 
-
     fn gen_test_table_obj() -> TestTable {
         TestTable {
             id: 0,
@@ -643,7 +663,7 @@ mod test {
             i4: 44,
             i41: Some(455),
             r1: 0.0,
-            r2: Some(3.14),
+            r2: Some(f64::consts::PI),
             d1: 0.0,
             d2: Some(345.0),
             t1: "4".to_string(),
@@ -651,19 +671,22 @@ mod test {
             t3: Some("test".to_string()),
             t4: Some("adf".to_string()),
             byte1: Some(Vec::from("안녕하세요你好こんにちはЗдравствуйте💖💖💖💖💖")),
-            interval1: Some(PgInterval{
+            interval1: Some(PgInterval {
                 months: 0,
                 days: 1,
                 microseconds: 10000,
             }),
-            big1: Some(Decimal::new(234,1)),
-            big2: Some(Decimal::new(223434,2)),
+            big1: Some(Decimal::new(234, 1)),
+            big2: Some(Decimal::new(223434, 2)),
             ts1: Default::default(),
             ts2: Some(Default::default()),
             date1: Some(Default::default()),
             date2: Some(Default::default()),
             time1: Default::default(),
-            time2: Some(PgTimeTz{ time: Default::default(), offset: FixedOffset::east_opt(0).unwrap() }),
+            time2: Some(PgTimeTz {
+                time: Default::default(),
+                offset: FixedOffset::east_opt(0).unwrap(),
+            }),
             uid1: Default::default(),
             json1: Some(serde_json::from_str("{}").unwrap()),
             json2: Some(serde_json::from_str("[{}, {}]").unwrap()),
@@ -682,9 +705,7 @@ mod test {
     async fn delete_by_id_test() {
         let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
         let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
-        let result =delete_by_id(&mut conn, 3).await;
+        let result = delete_by_id(&mut conn, 3).await;
         println!("delete result:{:?}", result)
     }
-
-
 }

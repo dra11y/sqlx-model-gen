@@ -11,8 +11,8 @@ for more see examples/pg_examples.rs
 # example
 
 ```rust
-use sql_wrapper::generator::Generator;
-use sql_wrapper::pg_generator;
+use sqlx_model_gen::generator::Generator;
+use sqlx_model_gen::pg_generator;
 
 #[tokio::main]
 async fn main() {
