@@ -7,7 +7,8 @@ license = "MIT"
 homepage = "https://github.com/dra11y/sqlx-model-gen"
 
 [dependencies]
-sqlx = { version = "0.8.2", features = ["runtime-tokio", "postgres", "chrono", "sqlx-postgres", "uuid", "rust_decimal", "mysql", "sqlx-mysql", "bigdecimal"] }
+# sqlx = { version = "0.8.2", features = ["runtime-tokio", "postgres", "chrono", "sqlx-postgres", "uuid", "rust_decimal", "mysql", "sqlx-mysql", "bigdecimal"] }
+sqlx = { version = "0.8.2", features = ["runtime-tokio", "postgres", "chrono", "sqlx-postgres", "uuid", "rust_decimal", "bigdecimal"] }
 sql-builder = "3.1.1"
 tokio = { version = "1.38.0", features = ["macros", "rt", "rt-multi-thread"] }
 chrono = "0.4.38"

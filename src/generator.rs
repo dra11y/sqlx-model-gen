@@ -22,7 +22,17 @@ pub(crate) fn escape_rs_keyword_name(input: &str) -> String {
 #[derive(sqlx::FromRow, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableInfo {
     pub table_name: String,
-    pub is_view: bool,
+    is_view: bool,
+}
+
+impl TableInfo {
+    pub fn is_view(&self) -> bool {
+        self.is_view
+    }
+
+    pub fn is_not_view(&self) -> bool {
+        !self.is_view
+    }
 }
 
 #[derive(sqlx::FromRow, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,19 +55,19 @@ pub struct ModuleInfo {
 pub trait Generator {
     fn get_tables(
         &self,
-        conn_url: &str,
+        database_url: &str,
         schema: &str,
     ) -> impl Future<Output = Vec<TableInfo>> + Send;
 
     fn query_all_columns(
         &self,
-        conn_url: &str,
+        database_url: &str,
         schemas: &[&str],
     ) -> impl Future<Output = Vec<ColumnInfo>> + Send;
 
     fn query_columns(
         &self,
-        conn_url: &str,
+        database_url: &str,
         table_name: &str,
     ) -> impl Future<Output = Vec<ColumnInfo>> + Send;
 
@@ -90,16 +100,16 @@ pub trait Generator {
     /// use sqlx_model_gen::generator::Generator;
     /// use sqlx_model_gen::pg_generator;
     ///     let gen = pg_generator::PgGenerator{};
-    ///     let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+    ///     let database_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
     ///     let table_name = "test_table";
-    ///     let result = gen.gen_file(conn_url, table_name).await;
+    ///     let result = gen.gen_file(database_url, table_name).await;
     ///     println!("result:{:?}", result)
     /// ```
     /// after run , if success, test_table.rs file would generate.
     ///
     fn gen_struct_module(
         &self,
-        conn_url: &str,
+        database_url: &str,
         table_name: &str,
         udt_mappings: Option<&HashMap<String, String>>,
     ) -> impl std::future::Future<Output = Result<ModuleInfo, sqlx::Error>> + Send
@@ -107,7 +117,7 @@ pub trait Generator {
         Self: Sync,
     {
         async move {
-            let columns: Vec<ColumnInfo> = self.query_columns(conn_url, table_name).await;
+            let columns: Vec<ColumnInfo> = self.query_columns(database_url, table_name).await;
 
             if columns.is_empty() {
                 return Err(sqlx::Error::TypeNotFound {
@@ -158,16 +168,17 @@ pub trait Generator {
         column_infos: &[ColumnInfo],
         udt_mappings: &HashMap<String, String>,
     ) -> String {
-        let mut st =
-            String::from_str("#[derive(sqlx::FromRow, Clone, Debug, PartialEq)] \npub struct ")
-                .unwrap();
+        let mut st = String::new();
+        st.push_str("use serde::{Deserialize, Serialize};\n");
+        st.push_str("#[derive(sqlx::FromRow, Clone, Debug, PartialEq, Serialize, Deserialize)]\n");
+        st.push_str("pub struct ");
         st.push_str(self.gen_struct_name(table_name).as_str());
         st.push_str(" {\n");
         for c in column_infos {
             let field_name = escape_rs_keyword_name(c.column_name.as_str());
             st.push_str("    pub ");
             st.push_str(field_name.as_str());
-            let ctype = self.get_mapping_type(c.udt_name.as_str(), &udt_mappings);
+            let ctype = self.get_mapping_type(c.udt_name.as_str(), udt_mappings);
             st.push_str(": ");
             if c.is_nullable {
                 st.push_str("Option<");

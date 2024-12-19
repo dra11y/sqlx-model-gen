@@ -6,8 +6,8 @@ use sqlx::{Connection, PgConnection};
 pub struct PgGenerator;
 
 impl Generator for PgGenerator {
-    async fn get_tables(&self, conn_url: &str, schema: &str) -> Vec<TableInfo> {
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+    async fn get_tables(&self, database_url: &str, schema: &str) -> Vec<TableInfo> {
+        let mut conn: PgConnection = PgConnection::connect(database_url).await.unwrap();
         let sql =
             "select table_name, (table_type = 'VIEW') AS is_view from information_schema.tables where table_type IN ('BASE TABLE', 'VIEW') AND table_schema = $1;".to_string();
         sqlx::query_as(sql.as_str())
@@ -17,8 +17,8 @@ impl Generator for PgGenerator {
             .expect("Failed to query postgres tables")
     }
 
-    async fn query_all_columns(&self, conn_url: &str, schemas: &[&str]) -> Vec<ColumnInfo> {
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+    async fn query_all_columns(&self, database_url: &str, schemas: &[&str]) -> Vec<ColumnInfo> {
+        let mut conn: PgConnection = PgConnection::connect(database_url).await.unwrap();
         let sql = "SELECT
                 column_name,
                 table_name,
@@ -36,8 +36,8 @@ impl Generator for PgGenerator {
         columns
     }
 
-    async fn query_columns(&self, conn_url: &str, table_name: &str) -> Vec<ColumnInfo> {
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+    async fn query_columns(&self, database_url: &str, table_name: &str) -> Vec<ColumnInfo> {
+        let mut conn: PgConnection = PgConnection::connect(database_url).await.unwrap();
         let sql = "SELECT
                 column_name,
                 table_name,
@@ -58,6 +58,13 @@ impl Generator for PgGenerator {
     fn get_mapping_type(&self, sql_type: &str, udt_mappings: &HashMap<String, String>) -> String {
         let sql_type = sql_type.to_uppercase();
 
+        if let Some(array_of_type) = sql_type.strip_prefix('_') {
+            return format!(
+                "Vec<{}>",
+                self.get_mapping_type(array_of_type, udt_mappings)
+            );
+        }
+
         if sql_type.contains("char(") {
             return "String".to_string();
         }
@@ -66,11 +73,8 @@ impl Generator for PgGenerator {
             return "sqlx::types::BigDecimal".to_string();
         }
 
-        if let Some(array_of_type) = sql_type.strip_prefix('_') {
-            return format!(
-                "Vec<{}>",
-                self.get_mapping_type(array_of_type, udt_mappings)
-            );
+        if let Some(user_type) = udt_mappings.get(&sql_type) {
+            return user_type.to_string();
         }
 
         match sql_type.as_str() {
@@ -108,9 +112,7 @@ impl Generator for PgGenerator {
             "TIMESTAMPTZ" => "chrono::DateTime<chrono::Utc>",
             "UUID" => "uuid::Uuid",
             "VOID" => "()",
-            _ => udt_mappings.get(&sql_type).unwrap_or_else(|| {
-                panic!("Unsupported type: {}", sql_type);
-            }),
+            _ => panic!("Unsupported type: {}", sql_type),
         }
         .to_string()
     }
@@ -595,8 +597,9 @@ mod test {
 
     #[tokio::test]
     async fn select_test() {
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let database_url =
+            "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(database_url).await.unwrap();
         let sql = "select * from test_table".to_string();
 
         let columns: Vec<TestTable> = sqlx::query_as(sql.as_str())
@@ -615,33 +618,37 @@ mod test {
     #[tokio::test]
     async fn gen_file_test() {
         let gen = PgGenerator {};
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let database_url =
+            "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
         let table_name = "test_table";
-        let result = gen.gen_struct_module(conn_url, table_name, None).await;
+        let result = gen.gen_struct_module(database_url, table_name, None).await;
         println!("result:{:?}", result)
     }
 
     #[tokio::test]
     async fn insert_returning_id_test() {
         let obj = gen_test_table_obj();
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let database_url =
+            "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(database_url).await.unwrap();
         let id = insert_returning_id(&mut conn, obj).await;
         println!("insert return id:{id}")
     }
     #[tokio::test]
     async fn insert_test() {
         let obj = gen_test_table_obj();
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let database_url =
+            "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(database_url).await.unwrap();
         let result = insert(&mut conn, obj).await;
         println!("{}", result.unwrap().rows_affected())
     }
 
     #[tokio::test]
     async fn test_query_1() {
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let database_url =
+            "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(database_url).await.unwrap();
         let columns: Vec<TestTable> = sqlx::query_as("select * from test_table")
             .fetch_all(&mut conn)
             .await
@@ -654,8 +661,9 @@ mod test {
         let obj = gen_test_table_obj();
         let obj1 = gen_test_table_obj();
         let list = vec![obj, obj1];
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let database_url =
+            "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(database_url).await.unwrap();
         let ids = batch_insert_returning_id(&mut conn, list).await;
         println!("insert ids: {:?}", ids)
     }
@@ -667,16 +675,18 @@ mod test {
         let mut obj1 = gen_test_table_obj();
         obj1.id = 61;
         let list = vec![obj, obj1];
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let database_url =
+            "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(database_url).await.unwrap();
         let result = batch_insert(&mut conn, list).await;
         println!("{:?}", result);
     }
 
     #[tokio::test]
     async fn select_by_id_test() {
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let database_url =
+            "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(database_url).await.unwrap();
         let result = select_by_id(&mut conn, 65).await;
         println!("{:?}", result)
     }
@@ -731,8 +741,9 @@ mod test {
 
     #[tokio::test]
     async fn delete_by_id_test() {
-        let conn_url = "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
-        let mut conn: PgConnection = PgConnection::connect(conn_url).await.unwrap();
+        let database_url =
+            "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
+        let mut conn: PgConnection = PgConnection::connect(database_url).await.unwrap();
         let result = delete_by_id(&mut conn, 3).await;
         println!("delete result:{:?}", result)
     }
