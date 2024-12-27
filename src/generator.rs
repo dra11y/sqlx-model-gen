@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::str::FromStr;
 
+use inflector::{cases::classcase::to_class_case, string::singularize::to_singular};
 use serde::{Deserialize, Serialize};
 
 const RUST_KEYWORDS: [&str; 51] = [
@@ -45,11 +46,20 @@ pub struct ColumnInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModuleInfo {
+pub struct StructInfo {
     pub struct_name: String,
     pub content: String,
+    // pub fields: Vec<FieldInfo>,
     pub user_types: HashMap<String, (String, String)>,
     pub columns: Vec<ColumnInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldInfo {
+    pub name: String,
+    pub column_info: ColumnInfo,
+    pub is_option: bool,
+    pub field_type: String,
 }
 
 pub trait Generator {
@@ -111,8 +121,10 @@ pub trait Generator {
         &self,
         database_url: &str,
         table_name: &str,
+        extra_derives: &[&str],
+        extra_annotations: &[&str],
         udt_mappings: Option<&HashMap<String, String>>,
-    ) -> impl std::future::Future<Output = Result<ModuleInfo, sqlx::Error>> + Send
+    ) -> impl std::future::Future<Output = Result<StructInfo, sqlx::Error>> + Send
     where
         Self: Sync,
     {
@@ -149,9 +161,15 @@ pub trait Generator {
                 .collect();
 
             let struct_name = self.gen_struct_name(table_name);
-            let content = self.gen_struct(table_name, &columns, &udt_mappings);
+            let content = self.gen_struct(
+                table_name,
+                &columns,
+                extra_derives,
+                extra_annotations,
+                &udt_mappings,
+            );
 
-            Ok(ModuleInfo {
+            Ok(StructInfo {
                 struct_name,
                 content,
                 user_types,
@@ -166,11 +184,22 @@ pub trait Generator {
         &self,
         table_name: &str,
         column_infos: &[ColumnInfo],
+        extra_derives: &[&str],
+        extra_annotations: &[&str],
         udt_mappings: &HashMap<String, String>,
     ) -> String {
         let mut st = String::new();
         st.push_str("use serde::{Deserialize, Serialize};\n");
-        st.push_str("#[derive(sqlx::FromRow, Clone, Debug, PartialEq, Serialize, Deserialize)]\n");
+        st.push_str("#[derive(sqlx::FromRow, Clone, Debug, PartialEq, Serialize, Deserialize");
+        if !extra_derives.is_empty() {
+            st.push_str(", ");
+            st.push_str(extra_derives.join(", ").as_str());
+        }
+        st.push_str(")]\n");
+        for annotation in extra_annotations {
+            st.push_str(annotation);
+            st.push('\n');
+        }
         st.push_str("pub struct ");
         st.push_str(self.gen_struct_name(table_name).as_str());
         st.push_str(" {\n");
@@ -194,27 +223,7 @@ pub trait Generator {
     }
 
     fn gen_struct_name(&self, table: &str) -> String {
-        let src_name = table.to_lowercase();
-        let mut to_up = true;
-        let mut new_name = String::new();
-        let mut idx = 0;
-        for c in src_name.chars() {
-            if idx == 0 {
-                to_up = true;
-            }
-            if c == '_' {
-                to_up = true;
-                continue;
-            }
-            if to_up {
-                new_name.push(c.to_ascii_uppercase());
-                to_up = false;
-            } else {
-                new_name.push(c);
-            }
-            idx += 1;
-        }
-        new_name
+        to_class_case(&to_singular(table))
     }
 
     fn gen_field_and_value_str(&self, column_infos: &[ColumnInfo], contain_id: bool) -> String {
