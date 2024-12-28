@@ -621,7 +621,9 @@ mod test {
         let database_url =
             "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
         let table_name = "test_table";
-        let result = gen.gen_struct_module(database_url, table_name, None).await;
+        let result = gen
+            .gen_struct_module(database_url, table_name, &[], &[], None)
+            .await;
         println!("result:{:?}", result)
     }
 
