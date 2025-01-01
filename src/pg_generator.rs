@@ -64,11 +64,11 @@ impl Generator for PgGenerator {
         let sql_type = sql_type.to_uppercase();
 
         if let Some(array_of_type) = sql_type.strip_prefix('_') {
-            return format!(
-                "Vec<{}>",
-                self.wrap_nullable(
-                    is_nullable,
-                    &self.get_mapping_type(array_of_type, is_nullable, udt_mappings)
+            return self.wrap_nullable(
+                is_nullable,
+                &format!(
+                    "Vec<{}>",
+                    &self.get_mapping_type(array_of_type, is_nullable, udt_mappings),
                 ),
             );
         }
