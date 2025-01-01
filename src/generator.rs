@@ -178,7 +178,20 @@ pub trait Generator {
         }
     }
 
-    fn get_mapping_type(&self, sql_type: &str, udt_mappings: &HashMap<String, String>) -> String;
+    fn wrap_nullable(&self, is_nullable: bool, ctype: &str) -> String {
+        if is_nullable {
+            format!("Option<{}>", ctype)
+        } else {
+            ctype.to_string()
+        }
+    }
+
+    fn get_mapping_type(
+        &self,
+        sql_type: &str,
+        is_nullable: bool,
+        udt_mappings: &HashMap<String, String>,
+    ) -> String;
 
     fn gen_struct(
         &self,
@@ -207,15 +220,9 @@ pub trait Generator {
             let field_name = escape_rs_keyword_name(c.column_name.as_str());
             st.push_str("    pub ");
             st.push_str(field_name.as_str());
-            let ctype = self.get_mapping_type(c.udt_name.as_str(), udt_mappings);
+            let ctype = self.get_mapping_type(c.udt_name.as_str(), c.is_nullable, udt_mappings);
             st.push_str(": ");
-            if c.is_nullable {
-                st.push_str("Option<");
-                st.push_str(ctype.as_str());
-                st.push('>')
-            } else {
-                st.push_str(ctype.as_str());
-            }
+            st.push_str(ctype.as_str());
             st.push_str(",\n");
         }
         st.push_str("}\n");

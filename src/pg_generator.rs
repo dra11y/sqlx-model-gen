@@ -55,26 +55,43 @@ impl Generator for PgGenerator {
         columns
     }
 
-    fn get_mapping_type(&self, sql_type: &str, udt_mappings: &HashMap<String, String>) -> String {
+    fn get_mapping_type(
+        &self,
+        sql_type: &str,
+        is_nullable: bool,
+        udt_mappings: &HashMap<String, String>,
+    ) -> String {
         let sql_type = sql_type.to_uppercase();
+
+        // serde_json::Value handles nulls as Value::Null.
+        // Implement custom udt mapping for "json" / "jsonb" if you want to handle nulls differently,
+        // e.g. NullableValue(Option<Value>), or override as Option<serde_json::Value>.
+        let is_nullable = is_nullable && !["JSON", "JSONB"].contains(&sql_type.as_str());
 
         if let Some(array_of_type) = sql_type.strip_prefix('_') {
             return format!(
                 "Vec<{}>",
-                self.get_mapping_type(array_of_type, udt_mappings)
+                self.wrap_nullable(
+                    is_nullable,
+                    &self.get_mapping_type(array_of_type, is_nullable, udt_mappings)
+                ),
             );
         }
 
         if sql_type.contains("char(") {
-            return "String".to_string();
+            return self.wrap_nullable(is_nullable, "String");
         }
 
         if sql_type.starts_with("numeric") {
-            return "sqlx::types::BigDecimal".to_string();
+            return self.wrap_nullable(is_nullable, "sqlx::types::BigDecimal");
+        }
+
+        if let Some(user_type) = udt_mappings.get(&format!("{}?", &sql_type)) {
+            return user_type.to_string();
         }
 
         if let Some(user_type) = udt_mappings.get(&sql_type) {
-            return user_type.to_string();
+            return self.wrap_nullable(is_nullable, user_type);
         }
 
         match sql_type.as_str() {
