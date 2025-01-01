@@ -121,9 +121,10 @@ pub trait Generator {
         &self,
         database_url: &str,
         table_name: &str,
+        struct_name: Option<&str>,
         extra_derives: &[&str],
         extra_annotations: &[&str],
-        udt_mappings: Option<&HashMap<String, String>>,
+        udt_mappings: Option<&HashMap<&str, &str>>,
     ) -> impl std::future::Future<Output = Result<StructInfo, sqlx::Error>> + Send
     where
         Self: Sync,
@@ -139,12 +140,18 @@ pub trait Generator {
 
             println!("Columns: {:?}", columns);
 
-            let udt_mappings: HashMap<String, String> = udt_mappings
+            let udt_mappings = udt_mappings
                 .cloned()
                 .unwrap_or(HashMap::new())
                 .into_iter()
-                .map(|(k, v)| (k.to_uppercase(), v))
-                .collect();
+                .map(|(k, v)| {
+                    if k.contains("::") || k.contains('.') {
+                        (k.to_string(), v.to_string())
+                    } else {
+                        (k.to_uppercase(), v.to_string())
+                    }
+                })
+                .collect::<HashMap<_, _>>();
 
             let user_types: HashMap<String, (String, String)> = columns
                 .iter()
@@ -160,9 +167,12 @@ pub trait Generator {
                 })
                 .collect();
 
-            let struct_name = self.gen_struct_name(table_name);
+            let struct_name = struct_name
+                .map(str::to_string)
+                .unwrap_or_else(|| self.gen_struct_name(table_name));
             let content = self.gen_struct(
-                table_name,
+                &table_name,
+                &struct_name,
                 &columns,
                 extra_derives,
                 extra_annotations,
@@ -196,37 +206,50 @@ pub trait Generator {
     fn gen_struct(
         &self,
         table_name: &str,
+        struct_name: &str,
         column_infos: &[ColumnInfo],
         extra_derives: &[&str],
         extra_annotations: &[&str],
         udt_mappings: &HashMap<String, String>,
     ) -> String {
-        let mut st = String::new();
-        st.push_str("use serde::{Deserialize, Serialize};\n");
-        st.push_str("#[derive(sqlx::FromRow, Clone, Debug, PartialEq, Serialize, Deserialize");
+        let mut content = String::new();
+        content.push_str("use serde::{Deserialize, Serialize};\n");
+        content.push_str("#[derive(sqlx::FromRow, Clone, Debug, PartialEq, Serialize, Deserialize");
         if !extra_derives.is_empty() {
-            st.push_str(", ");
-            st.push_str(extra_derives.join(", ").as_str());
+            content.push_str(", ");
+            content.push_str(extra_derives.join(", ").as_str());
         }
-        st.push_str(")]\n");
+        content.push_str(")]\n");
         for annotation in extra_annotations {
-            st.push_str(annotation);
-            st.push('\n');
+            content.push_str(annotation);
+            content.push('\n');
         }
-        st.push_str("pub struct ");
-        st.push_str(self.gen_struct_name(table_name).as_str());
-        st.push_str(" {\n");
+        content.push_str("pub struct ");
+        content.push_str(struct_name);
+        content.push_str(" {\n");
         for c in column_infos {
             let field_name = escape_rs_keyword_name(c.column_name.as_str());
-            st.push_str("    pub ");
-            st.push_str(field_name.as_str());
-            let ctype = self.get_mapping_type(c.udt_name.as_str(), c.is_nullable, udt_mappings);
-            st.push_str(": ");
-            st.push_str(ctype.as_str());
-            st.push_str(",\n");
+            content.push_str("    pub ");
+            content.push_str(field_name.as_str());
+            let match_key = format!("{struct_name}::{field_name}");
+            if match_key == "RawReport::report".to_string() {
+                println!("match_key: {}", match_key);
+                println!("udt_mappings: {:#?}", udt_mappings);
+            }
+
+            let field_type = udt_mappings
+                .get(&format!("{table_name}.{}", &c.column_name))
+                .or_else(|| udt_mappings.get(&format!("{struct_name}::{field_name}")))
+                .map(|s| s.clone())
+                .unwrap_or_else(|| {
+                    self.get_mapping_type(c.udt_name.as_str(), c.is_nullable, udt_mappings)
+                });
+            content.push_str(": ");
+            content.push_str(field_type.as_str());
+            content.push_str(",\n");
         }
-        st.push_str("}\n");
-        st
+        content.push_str("}\n");
+        content
     }
 
     fn gen_struct_name(&self, table: &str) -> String {

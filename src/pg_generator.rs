@@ -63,11 +63,6 @@ impl Generator for PgGenerator {
     ) -> String {
         let sql_type = sql_type.to_uppercase();
 
-        // serde_json::Value handles nulls as Value::Null.
-        // Implement custom udt mapping for "json" / "jsonb" if you want to handle nulls differently,
-        // e.g. NullableValue(Option<Value>), or override as Option<serde_json::Value>.
-        let is_nullable = is_nullable && !["JSON", "JSONB"].contains(&sql_type.as_str());
-
         if let Some(array_of_type) = sql_type.strip_prefix('_') {
             return format!(
                 "Vec<{}>",
@@ -641,7 +636,7 @@ mod test {
             "postgres://postgres:123456@localhost/jixin_message?&stringtype=unspecified";
         let table_name = "test_table";
         let result = gen
-            .gen_struct_module(database_url, table_name, &[], &[], None)
+            .gen_struct_module(database_url, table_name, None, &[], &[], None)
             .await;
         println!("result:{:?}", result)
     }
