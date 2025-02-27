@@ -165,6 +165,17 @@ pub trait Generator {
                             )
                         })
                 })
+                .chain(
+                    udt_mappings
+                        .iter()
+                        .filter(|(key, _)| {
+                            key.split('.')
+                                .next()
+                                .map(|k| k.to_lowercase() == table_name.to_lowercase())
+                                .unwrap_or(false)
+                        })
+                        .map(|(key, rs_type)| (key.clone(), (key.clone(), rs_type.clone()))),
+                )
                 .collect();
 
             let struct_name = struct_name
@@ -231,11 +242,11 @@ pub trait Generator {
             let field_name = escape_rs_keyword_name(c.column_name.as_str());
             content.push_str("    pub ");
             content.push_str(field_name.as_str());
-            let match_key = format!("{struct_name}::{field_name}");
-            if match_key == "RawReport::report".to_string() {
-                println!("match_key: {}", match_key);
-                println!("udt_mappings: {:#?}", udt_mappings);
-            }
+            // let match_key = format!("{struct_name}::{field_name}");
+            // if match_key == "RawReport::report".to_string() {
+            //     println!("match_key: {}", match_key);
+            //     println!("udt_mappings: {:#?}", udt_mappings);
+            // }
 
             let field_type = udt_mappings
                 .get(&format!("{table_name}.{}", &c.column_name))
